@@ -26,6 +26,10 @@ CUDA_ROOT = os.environ.get(
     "CUDA_HOME", os.environ.get("CUDA_PATH", os.path.abspath("/usr/local/cuda"))
 )
 
+RAJA_ROOT = os.environ.get(
+    "RAJA_ROOT", os.environ.get("RAJA_HOME", os.path.abspath("/usr/local"))
+)
+
 GT_REPO_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "_external_src", "gridtools")
 )
@@ -37,6 +41,7 @@ build_settings = {
     "cuda_bin_path": os.path.join(CUDA_ROOT, "bin"),
     "cuda_include_path": os.path.join(CUDA_ROOT, "include"),
     "cuda_library_path": os.path.join(CUDA_ROOT, "lib64"),
+    "raja_include_path": os.path.join("RAJA_ROOT", "include"),
     "gt_include_path": os.environ.get("GT_INCLUDE_PATH", GT_INCLUDE_PATH),
     "extra_compile_args": [],
     "extra_link_args": [],
