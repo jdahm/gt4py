@@ -14,33 +14,35 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+from gt4py import backend as gt_backend
+from gt4py import ir as gt_ir
+from gt4py import utils as gt_utils
 
-class RAJASourceGenerator:
-    pass
+from .gt_cpu_backend import make_x86_layout_map, x86_is_compatible_layout, gtcpu_is_compatible_type
+from .base_gt_backend import BaseGTBackend
 
+class RAJAPyExtGenerator(gt_ir.IRNodeVisitor):
 
-def raja_layout(mask):
-    pass
-
-
-def raja_is_compatible_layout(field):
-    pass
-
-
-def raja_is_compatible_type(field):
-    pass
 
 
 @gt_backend.register
-class DebugBackend(gt_backend.BaseBackend):
-    name = "raja-serial"
-    options = {}
+class RajaBackend(gt_backend.BaseBackend):
+    GENERATOR_CLASS = RajaPyModuleGenerator
+    name = "rajaserial"
+    options = BaseGTBackend.GT_BACKEND_OPTS
     storage_info = {
         "alignment": 1,
         "device": "cpu",
-        "layout_map": raja_layout,
-        "is_compatible_layout": raja_is_compatible_layout,
-        "is_compatible_type": raja_is_compatible_type,
+        "layout_map": make_x86_layout_map,
+        "is_compatible_layout": x86_is_compatible_layout,
+        "is_compatible_type": gtcpu_is_compatible_type,
     }
 
-    GENERATOR_CLASS = RAJAModuleGenerator
+    @classmethod
+    def generate_extension(cls, stencil_id, implementation_ir, options):
+        pyext_opts = dict(
+            verbose=options.backend_opts.pop("verbose", False),
+            clean=options.backend_opts.pop("clean", False),
+            debug_mode=options.backend_opts.pop("debug_mode", False),
+            add_profile_info=options.backend_opts.pop("add_profile_info", False),
+        )
