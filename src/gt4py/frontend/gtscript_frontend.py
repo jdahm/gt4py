@@ -30,6 +30,7 @@ from gt4py import gtscript
 from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
 from gt4py.utils import meta as gt_meta, NOTHING
+from gt4py.ir.utils import make_parallel_axis_intervals
 
 
 class GTScriptSyntaxError(gt_definitions.GTSyntaxError):
@@ -1080,13 +1081,18 @@ class GTScriptParser(ast.NodeVisitor):
         nonlocal_symbols = {}
 
         name_nodes = gt_meta.collect_names(definition)
-        for collected_name in name_nodes.keys():
+        for collected_name, nodes in name_nodes.items():
             if collected_name not in gtscript.builtins:
                 root_name = collected_name.split(".")[0]
                 if root_name in imported_symbols:
                     imported_symbols[root_name].setdefault(
                         collected_name, name_nodes[collected_name]
                     )
+                elif gt_meta.referenced_inside_call(definition, nodes[0], "region"):
+                    # Get the larger context (includes nonlocals and builtins)
+                    # and store the live object ref
+                    larger_context, _ = gt_meta.get_closure(definition)
+                    nonlocal_symbols[root_name] = larger_context[root_name]
                 elif root_name in context:
                     nonlocal_symbols[collected_name] = GTScriptParser.eval_constant(
                         collected_name,
