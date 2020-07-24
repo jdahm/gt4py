@@ -699,6 +699,7 @@ class ComputationBlock(Node):
     interval = attribute(of=AxisInterval)
     iteration_order = attribute(of=IterationOrder)
     body = attribute(of=BlockStmt)
+    parallel_interval = attribute(of=ListOf[AxisInterval], optional=True)
     loc = attribute(of=Location, optional=True)
 
 
@@ -748,6 +749,7 @@ class ApplyBlock(Node):
     interval = attribute(of=AxisInterval)
     local_symbols = attribute(of=DictOf[str, VarDecl])
     body = attribute(of=BlockStmt)
+    parallel_interval = attribute(of=ListOf[AxisInterval], optional=True)
 
 
 @attribclass
