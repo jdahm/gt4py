@@ -122,7 +122,10 @@ storing a reference to the piece of source code which originated the node.
         # start is included
         # end is excluded
 
-    ComputationBlock(interval: AxisInterval, order: IterationOrder, body: BlockStmt)
+    ComputationBlock(interval: AxisInterval,
+                     order: IterationOrder,
+                     body: BlockStmt,
+                     [parallel_interval: List[AxisInterval]])
 
     ArgumentInfo(name: str, is_keyword: bool, [default: Any])
 
@@ -146,7 +149,8 @@ Implementation IR
 
     ApplyBlock(interval: AxisInterval,
                local_symbols: Dict[str, VarDecl],
-               body: BlockStmt)
+               body: BlockStmt,
+               [parallel_interval: List[AxisInterval]])
 
     Stage(name: str,
           accessors: List[Accessor],
