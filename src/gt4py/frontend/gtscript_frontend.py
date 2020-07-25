@@ -456,6 +456,7 @@ class ParsingContext(enum.Enum):
     CONTROL_FLOW = 1
     COMPUTATION = 2
     INTERVAL = 3
+    REGION = 4
 
 
 class IRMaker(ast.NodeVisitor):
