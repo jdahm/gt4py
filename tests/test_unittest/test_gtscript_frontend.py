@@ -476,3 +476,71 @@ class TestAssignmentSyntax:
                 with computation(PARALLEL), interval(...):
                     tmp[0, 0, 0] = 2 * in_field
                     out_field = tmp
+
+
+class TestRegions:
+    Interval = gt_definitions.Interval
+
+    regions = [
+        gt_definitions.make_region_on_axis(0, Interval.START, 0, 1),
+        gt_definitions.Region(((Interval.STOP, -3), (Interval.STOP, 0)), None),
+    ]
+
+    def test_on_interval_only(self):
+        module = f"TestRegion_on_interval_only_{id_version}"
+        externals = {}
+
+        def stencil(in_f: gtscript.Field[np.float_]):
+            with computation(PARALLEL), interval(...), region(*self.regions):
+                in_f = 1.0
+
+        compile_definition(stencil, "stencil", module, externals=externals)
+
+    def test_with_default(self):
+        module = f"TestRegion_with_default_{id_version}"
+        externals = {}
+
+        def stencil(in_f: gtscript.Field[np.float_]):
+            with computation(PARALLEL), interval(...):
+                in_f = in_f + 1.0
+                with region(*self.regions):
+                    in_f = 1.0
+
+        compile_definition(stencil, "stencil", module, externals=externals)
+
+    def test_multiple_with_default(self):
+        module = f"TestRegion_multiple_with_default_{id_version}"
+        externals = {}
+
+        def stencil(in_f: gtscript.Field[np.float_]):
+            with computation(PARALLEL), interval(...):
+                in_f = in_f + 1.0
+                with region(self.regions[0]):
+                    in_f = 1.0
+                with region(self.regions[1]):
+                    in_f = 2.0
+
+        compile_definition(stencil, "stencil", module, externals=externals)
+
+    def test_error_list_variable(self):
+        module = f"TestRegion_error_list_variable_{id_version}"
+        externals = {}
+
+        def stencil(in_f: gtscript.Field[np.float_]):
+            with computation(PARALLEL), interval(...), region(self.regions):
+                in_f = 1.0
+
+        with pytest.raises(gt_frontend.GTScriptSymbolError, match="region"):
+            compile_definition(stencil, "stencil", module, externals=externals)
+
+    def test_error_nested_regions(self):
+        module = f"TestRegion_error_nested_regions_{id_version}"
+        externals = {}
+
+        def stencil(in_f: gtscript.Field[np.float_]):
+            with computation(PARALLEL), interval(...), region(self.regions[0]):
+                with region(self.regions[1]):
+                    in_f = 1.0
+
+        with pytest.raises(gt_frontend.GTScriptDefinitionError, match="nested regions"):
+            compile_definition(stencil, "stencil", module, externals=externals)
