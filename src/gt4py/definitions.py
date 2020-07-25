@@ -19,6 +19,7 @@ import collections
 import enum
 import numbers
 import operator
+import types
 
 from gt4py import utils as gt_utils
 from gt4py.utils.attrib import (
