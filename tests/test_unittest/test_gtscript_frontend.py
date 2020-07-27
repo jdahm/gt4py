@@ -514,11 +514,11 @@ class TestRegions:
 
         def stencil(in_f: gtscript.Field[np.float_]):
             with computation(PARALLEL), interval(...):
-                in_f = in_f + 1.0
-                with region(self.regions[0]):
-                    in_f = 1.0
-                with region(self.regions[1]):
-                    in_f = 2.0
+                    in_f = in_f + 1.0
+                    with region(self.regions[0]):
+                        in_f = 1.0
+                    with region(self.regions[1]):
+                        in_f = 2.0
 
         compile_definition(stencil, "stencil", module, externals=externals)
 
@@ -530,7 +530,7 @@ class TestRegions:
             with computation(PARALLEL), interval(...), region(self.regions):
                 in_f = 1.0
 
-        with pytest.raises(gt_frontend.GTScriptSymbolError, match="region"):
+        with pytest.raises(gt_frontend.GTScriptSymbolError, match="Not a valid region"):
             compile_definition(stencil, "stencil", module, externals=externals)
 
     def test_error_nested_regions(self):
@@ -542,5 +542,17 @@ class TestRegions:
                 with region(self.regions[1]):
                     in_f = 1.0
 
-        with pytest.raises(gt_frontend.GTScriptDefinitionError, match="nested regions"):
+        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="'with' statements are not allowed"):
+            compile_definition(stencil, "stencil", module, externals=externals)
+
+    def test_error_region_before_interval(self):
+        module = f"TestRegion_error_region_before_interval_{id_version}"
+        externals = {}
+
+        def stencil(in_f: gtscript.Field[np.float_]):
+            with computation(PARALLEL), region(self.regions[0]):
+                with interval(...):
+                    in_f = 1.0
+
+        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="Invalid 'with'"):
             compile_definition(stencil, "stencil", module, externals=externals)

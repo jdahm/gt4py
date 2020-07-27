@@ -21,6 +21,7 @@ import inspect
 import itertools
 import numbers
 import types
+from typing import List
 
 import numpy as np
 
@@ -451,6 +452,73 @@ class CompiledIfInliner(ast.NodeTransformer):
 #
 
 
+class RegionReplacer(ast.NodeTransformer):
+    @classmethod
+    def apply(cls, func_node: ast.FunctionDef, source: str, context: dict):
+        inliner = cls(source, context)
+        inliner(func_node)
+
+    def __init__(self, source, context):
+        self.source = source
+        self.context = context
+
+    def __call__(self, func_node: ast.FunctionDef):
+        self.visit(func_node)
+
+    def _find_region_source(self, line: int, col: int) -> str:
+        sizes = tuple(len(x) + 1 for x in self.source.split("\n"))
+        partial_sizes = [0] + list(itertools.accumulate(sizes))
+        offset = partial_sizes[line - 1] + col - 1
+
+        index = self.source[offset:].find("(")
+        assert index > 0
+        offset += index + 1
+
+        start, scope = offset, 1
+        while scope > 0:
+            if self.source[offset] in ("(", "["):
+                scope += 1
+            elif self.source[offset] in (")", "]"):
+                scope -= 1
+            offset += 1
+
+        return self.source[start : offset - 1]
+
+    def _extract_and_eval_regions(self, node: ast.Call):
+        code = self._find_region_source(node.lineno, node.col_offset).rstrip(" \n,") + ","
+        regions = tuple(eval(f"({code})", self.context))
+
+        for region in regions:
+            if not isinstance(region, gt_definitions.Region):
+                raise GTScriptSymbolError(f"Not a valid region: {region}")
+
+        return regions
+
+    def visit_With(self, node: ast.With):
+        item_contexts = [item.context_expr for item in node.items]
+        func_ids = [ctx.func.id for ctx in item_contexts if isinstance(ctx, ast.Call)]
+
+        if "region" in func_ids:
+            arg_index = func_ids.index("region")
+            regions = self._extract_and_eval_regions(node.items[arg_index].context_expr)
+
+            for stmt in node.body:
+                if isinstance(stmt, ast.With):
+                    raise GTScriptSyntaxError(
+                        "'with' statements are not allowed inside regions",
+                        loc=gt_ir.Location.from_ast_node(node),
+                    )
+
+            # Store 'regions' as auxilliary keyword in the AST
+            item_contexts[arg_index].regions = [
+                make_parallel_axis_intervals(region) for region in regions
+            ]
+            return node
+
+        else:
+            return self.generic_visit(node)
+
+
 @enum.unique
 class ParsingContext(enum.Enum):
     CONTROL_FLOW = 1
@@ -557,32 +625,42 @@ class IRMaker(ast.NodeVisitor):
 
         # Body
         body = list(node.body)
-        if len(node.items) == 2:
+        if len(node.items) > 1:
             nested_with_stmt = copy.deepcopy(node)
-            nested_with_stmt.items = [node.items[1]]
+            nested_with_stmt.items = gt_utils.listify(node.items[1:])
             nested_with_stmt.body = body
             body = [nested_with_stmt]
-        elif len(node.items) > 2:
+        elif len(node.items) > 3:
             raise syntax_error
 
         self.parsing_context = ParsingContext.COMPUTATION
         result = []
         for item in body:
-            block = self.visit(item)
-            assert isinstance(block, gt_ir.ComputationBlock)
-            block.iteration_order = iteration_order
-            result.append(block)
+            blocks = self.visit(item)
+            for block in blocks:
+                assert isinstance(block, gt_ir.ComputationBlock)
+                block.iteration_order = iteration_order
+                result.append(block)
         self.parsing_context = ParsingContext.CONTROL_FLOW
 
         if len(result) > 1:
-            # Vertical regions with variable references are not supported yet
+            # Vertical regions with variable references are not supported yet.
+            # The python interpreter promises that this is a stable sort
+            # (critical for correctness when regions are present)
             result.sort(key=self._sort_blocks_key)
             if iteration_order == gt_ir.IterationOrder.BACKWARD:
                 result.reverse()
 
         return result
 
-    def _visit_interval_node(self, node: ast.With) -> gt_ir.ComputationBlock:
+    def _visit_interval_node(self, node: ast.With) -> List[gt_ir.ComputationBlock]:
+        def make_block(interval, stmts):
+            return gt_ir.ComputationBlock(
+                interval=interval,
+                iteration_order=gt_ir.IterationOrder.PARALLEL,  # fix in _visit_computation_node()
+                body=gt_ir.BlockStmt(stmts=stmts),
+            )
+
         loc = gt_ir.Location.from_ast_node(node)
         interval_error = GTScriptSyntaxError(
             f"Invalid 'interval' specification at line {loc.line} (column {loc.column})", loc=loc
@@ -619,18 +697,54 @@ class IRMaker(ast.NodeVisitor):
             raise range_error
 
         self.parsing_context = ParsingContext.INTERVAL
+        computation_blocks = []
+        stmts = []
+        for stmt in node.body:
+            if isinstance(stmt, ast.With):
+                # Finish current block
+                if len(stmts) > 0:
+                    computation_blocks.append(make_block(interval, stmts))
+
+                # Can only be a `with region`
+                region_blocks = self.visit(stmt)
+                for block in region_blocks:
+                    block.interval = interval
+                    computation_blocks.append(block)
+
+                # Reset stmts list
+                stmts = []
+            else:
+                stmts.extend(gt_utils.listify(self.visit(stmt)))
+
+        if len(stmts) > 0:
+            computation_blocks.append(make_block(interval, stmts))
+
+        self.parsing_context = ParsingContext.COMPUTATION
+
+        return computation_blocks
+
+    def _visit_region_node(self, node: ast.With) -> List[gt_ir.ComputationBlock]:
+        loc = gt_ir.Location.from_ast_node(node)
+        region_error = GTScriptSyntaxError(
+            f"Invalid 'region' specification at line {loc.line} (column {loc.column})", loc=loc
+        )
+
+        self.parsing_context = ParsingContext.REGION
         stmts = []
         for stmt in node.body:
             stmts.extend(gt_utils.listify(self.visit(stmt)))
-        self.parsing_context = ParsingContext.COMPUTATION
+        self.parsing_context = ParsingContext.INTERVAL
 
-        result = gt_ir.ComputationBlock(
-            interval=interval,
-            iteration_order=gt_ir.IterationOrder.PARALLEL,
-            body=gt_ir.BlockStmt(stmts=stmts),
-        )
-
-        return result
+        region_node = node.items[0].context_expr
+        return [
+            gt_ir.ComputationBlock(
+                interval=gt_ir.AxisInterval.full_interval(),  # fixed in _visit_interval_node()
+                iteration_order=gt_ir.IterationOrder.PARALLEL,
+                body=gt_ir.BlockStmt(stmts=stmts),
+                parallel_interval=region,
+            )
+            for region in region_node.regions
+        ]
 
     # Visitor methods
     # -- Special nodes --
@@ -911,6 +1025,19 @@ class IRMaker(ast.NodeVisitor):
                 raise syntax_error
             else:
                 return self._visit_interval_node(node)
+
+        elif self.parsing_context == ParsingContext.INTERVAL:
+            region_node = node.items[0]
+            if (
+                region_node.optional_vars is not None
+                or not isinstance(region_node.context_expr, ast.Call)
+                or not isinstance(region_node.context_expr.func, ast.Name)
+                or region_node.context_expr.func.id != "region"
+            ):
+                raise syntax_error
+            else:
+                return self._visit_region_node(node)
+
         else:
             raise syntax_error
 
@@ -1295,6 +1422,9 @@ class GTScriptParser(ast.NodeVisitor):
         # Evaluate and inline compile-time conditionals
         CompiledIfInliner.apply(main_func_node, context=local_context)
         # Cleaner.apply(self.definition_ir)
+
+        # Evaluate parallel_intervals and insert into the AST
+        RegionReplacer.apply(main_func_node, source=self.source, context=local_context)
 
         # Generate definition IR
         domain = gt_ir.Domain.LatLonGrid()
