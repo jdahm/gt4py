@@ -554,5 +554,5 @@ class TestRegions:
                 with interval(...):
                     in_f = 1.0
 
-        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="Invalid 'with'"):
+        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="'with' statements are not allowed"):
             compile_definition(stencil, "stencil", module, externals=externals)
