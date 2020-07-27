@@ -499,9 +499,6 @@ class RegionReplacer(ast.NodeTransformer):
         func_ids = [ctx.func.id for ctx in item_contexts if isinstance(ctx, ast.Call)]
 
         if "region" in func_ids:
-            arg_index = func_ids.index("region")
-            regions = self._extract_and_eval_regions(node.items[arg_index].context_expr)
-
             for stmt in node.body:
                 if isinstance(stmt, ast.With):
                     raise GTScriptSyntaxError(
@@ -510,6 +507,8 @@ class RegionReplacer(ast.NodeTransformer):
                     )
 
             # Store 'regions' as auxilliary keyword in the AST
+            arg_index = func_ids.index("region")
+            regions = self._extract_and_eval_regions(node.items[arg_index].context_expr)
             item_contexts[arg_index].regions = [
                 make_parallel_axis_intervals(region) for region in regions
             ]
@@ -696,23 +695,28 @@ class IRMaker(ast.NodeVisitor):
         else:
             raise range_error
 
+        body = list(node.body)
+        if len(node.items) > 1:
+            nested_with_stmt = copy.deepcopy(node)
+            nested_with_stmt.items = [node.items[1]]
+            nested_with_stmt.body = body
+            body = [nested_with_stmt]
+
         self.parsing_context = ParsingContext.INTERVAL
         computation_blocks = []
         stmts = []
-        for stmt in node.body:
+        for stmt in body:
             if isinstance(stmt, ast.With):
                 # Finish current block
                 if len(stmts) > 0:
                     computation_blocks.append(make_block(interval, stmts))
+                    stmts = []
 
                 # Can only be a `with region`
                 region_blocks = self.visit(stmt)
                 for block in region_blocks:
                     block.interval = interval
                     computation_blocks.append(block)
-
-                # Reset stmts list
-                stmts = []
             else:
                 stmts.extend(gt_utils.listify(self.visit(stmt)))
 

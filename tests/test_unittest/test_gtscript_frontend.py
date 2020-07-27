@@ -51,11 +51,9 @@ def compile_definition(
     stencil_id = frontend.get_stencil_id(
         build_options.qualified_name, definition_func, externals, options_id
     )
-    gt_frontend.GTScriptParser(
+    return gt_frontend.GTScriptParser(
         definition_func, externals=externals or {}, options=build_options
     ).run()
-
-    return stencil_id
 
 
 # ---- Tests-----
@@ -494,7 +492,11 @@ class TestRegions:
             with computation(PARALLEL), interval(...), region(*self.regions):
                 in_f = 1.0
 
-        compile_definition(stencil, "stencil", module, externals=externals)
+        def_ir = compile_definition(stencil, "stencil", module, externals=externals)
+
+        assert len(def_ir.computations) == len(self.regions)
+        for i in range(len(self.regions)):
+            assert def_ir.computations[i].parallel_interval is not None
 
     def test_with_default(self):
         module = f"TestRegion_with_default_{id_version}"
@@ -506,7 +508,11 @@ class TestRegions:
                 with region(*self.regions):
                     in_f = 1.0
 
-        compile_definition(stencil, "stencil", module, externals=externals)
+        def_ir = compile_definition(stencil, "stencil", module, externals=externals)
+
+        assert len(def_ir.computations) == 1 + len(self.regions)
+        for i in range(1, len(self.regions) + 1):
+            assert def_ir.computations[i].parallel_interval is not None
 
     def test_multiple_with_default(self):
         module = f"TestRegion_multiple_with_default_{id_version}"
@@ -514,13 +520,17 @@ class TestRegions:
 
         def stencil(in_f: gtscript.Field[np.float_]):
             with computation(PARALLEL), interval(...):
-                    in_f = in_f + 1.0
-                    with region(self.regions[0]):
-                        in_f = 1.0
-                    with region(self.regions[1]):
-                        in_f = 2.0
+                in_f = in_f + 1.0
+                with region(self.regions[0]):
+                    in_f = 1.0
+                with region(self.regions[1]):
+                    in_f = 2.0
 
-        compile_definition(stencil, "stencil", module, externals=externals)
+        def_ir = compile_definition(stencil, "stencil", module, externals=externals)
+
+        assert len(def_ir.computations) == 1 + len(self.regions)
+        for i in range(1, len(self.regions) + 1):
+            assert def_ir.computations[i].parallel_interval is not None
 
     def test_error_list_variable(self):
         module = f"TestRegion_error_list_variable_{id_version}"
@@ -542,7 +552,9 @@ class TestRegions:
                 with region(self.regions[1]):
                     in_f = 1.0
 
-        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="'with' statements are not allowed"):
+        with pytest.raises(
+            gt_frontend.GTScriptSyntaxError, match="'with' statements are not allowed"
+        ):
             compile_definition(stencil, "stencil", module, externals=externals)
 
     def test_error_region_before_interval(self):
@@ -554,5 +566,7 @@ class TestRegions:
                 with interval(...):
                     in_f = 1.0
 
-        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="'with' statements are not allowed"):
+        with pytest.raises(
+            gt_frontend.GTScriptSyntaxError, match="'with' statements are not allowed"
+        ):
             compile_definition(stencil, "stencil", module, externals=externals)
