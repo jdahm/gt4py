@@ -512,6 +512,10 @@ class RegionReplacer(ast.NodeTransformer):
             item_contexts[arg_index].regions = [
                 make_parallel_axis_intervals(region) for region in regions
             ]
+
+            # Clear the arguments to avoid problems inlining values later
+            item_contexts[arg_index].args = []
+
             return node
 
         else:
@@ -1426,6 +1430,9 @@ class GTScriptParser(ast.NodeVisitor):
             self.external_context,
             exhaustive=False,
         )
+        # Evaluate parallel_intervals and insert into the AST
+        RegionReplacer.apply(main_func_node, source=self.source, context=local_context)
+
         ValueInliner.apply(main_func_node, context=local_context)
 
         # Inline function calls
@@ -1434,9 +1441,6 @@ class GTScriptParser(ast.NodeVisitor):
         # Evaluate and inline compile-time conditionals
         CompiledIfInliner.apply(main_func_node, context=local_context)
         # Cleaner.apply(self.definition_ir)
-
-        # Evaluate parallel_intervals and insert into the AST
-        RegionReplacer.apply(main_func_node, source=self.source, context=local_context)
 
         # Generate definition IR
         domain = gt_ir.Domain.LatLonGrid()

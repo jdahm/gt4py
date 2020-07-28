@@ -142,12 +142,15 @@ class IntervalBlockInfo:
         ComputeUnitInfo Id.
     interval : int
         IntervalInfo Id.
+    parallel_interval : `list` [`IntervalInfo`]
+        The parallel interval used for all ij_blocks.
     stmts : `list` [`gridtools.ir.Statement`]
         List of operations in the regional computation.
     """
 
     id = attribute(of=int)
     interval = attribute(of=IntervalInfo)
+    parallel_interval = attribute(of=ListOf[IntervalInfo], optional=True)
     stmts = attribute(of=ListOf[StatementInfo], factory=list)
     inputs = attribute(of=DictOf[str, Extent], factory=dict)
     outputs = attribute(of=SetOf[str], factory=set)
@@ -163,12 +166,15 @@ class IJBlockInfo:
         ComputeUnitInfo Id.
     interval : int
         IntervalInfo Id.
+    parallel_interval : `list` [`IntervalInfo`]
+        The parallel interval used for all ij_blocks.
     stmts : `list` [`gridtools.ir.Statement`]
         List of operations in the regional computation.
     """
 
     id = attribute(of=int)
     intervals = attribute(of=SetOf[IntervalInfo])
+    parallel_interval = attribute(of=ListOf[IntervalInfo], optional=True)
     interval_blocks = attribute(of=ListOf[IntervalBlockInfo], factory=list)
     inputs = attribute(of=DictOf[str, Extent], factory=dict)
     outputs = attribute(of=SetOf[str], factory=set)
@@ -185,6 +191,8 @@ class DomainBlockInfo:
         ComputeUnitInfo Id.
     interval : int
         IntervalInfo Id.
+    parallel_interval : `list` [`IntervalInfo`]
+        The parallel interval used for all ij_blocks.
     stmts : `list` [`gridtools.ir.Statement`]
         List of operations in the regional computation.
     """
@@ -192,6 +200,7 @@ class DomainBlockInfo:
     id = attribute(of=int)
     iteration_order = attribute(of=gt_ir.IterationOrder)
     intervals = attribute(of=SetOf[IntervalInfo])
+    parallel_interval = attribute(of=ListOf[IntervalInfo], optional=True)
     ij_blocks = attribute(of=ListOf[IJBlockInfo], factory=list)
     inputs = attribute(of=DictOf[str, Extent], factory=dict)
     outputs = attribute(of=SetOf[str], factory=set)
