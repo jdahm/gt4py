@@ -118,10 +118,13 @@ class PythonSourceGenerator(gt_ir.IRNodeVisitor):
             )
             for d, size in enumerate(boundary.frame_size)
         )
-        source_lines.append(
-            "{name} = {np_prefix}.empty(({shape}), dtype={np_prefix}.{dtype})".format(
-                name=name, np_prefix=self.numpy_prefix, shape=shape, dtype=data_type.dtype.name
-            )
+        source_lines.extend(
+            [
+                "{name} = {np_prefix}.empty(({shape}), dtype={np_prefix}.{dtype})".format(
+                    name=name, np_prefix=self.numpy_prefix, shape=shape, dtype=data_type.dtype.name
+                ),
+                "{name}[:] = {np_prefix}.nan".format(name=name, np_prefix=self.numpy_prefix),
+            ]
         )
 
         return source_lines
