@@ -71,7 +71,6 @@ Extent (:class:`gt4py.definitions.Extent`)
     [(lower: `int`, upper: `int`)+]
 
 
-
 -------------
 Definition IR
 -------------
@@ -84,7 +83,7 @@ storing a reference to the piece of source code which originated the node.
     Axis(name: str)
 
     Domain(parallel_axes: List[Axis], [sequential_axis: Axis, data_axes: List[Axis]])
-        # LatLonGrids -> parallel_axes: ["I", "J], sequential_axis: "K"
+        # LatLonGrids -> parallel_axes: ["I", "J"], sequential_axis: "K"
 
     Literal     = ScalarLiteral(value: Any (should match DataType), data_type: DataType)
                 | BuiltinLiteral(value: Builtin)
@@ -124,7 +123,11 @@ storing a reference to the piece of source code which originated the node.
         # start is included
         # end is excluded
 
-    ComputationBlock(interval: AxisInterval, iteration_order: IterationOrder, body: BlockStmt)
+    ComputationBlock(interval: AxisInterval,
+                     parallel_interval: List[AxisInterval],
+                     iteration_order: IterationOrder,
+                     body: BlockStmt)
+        # note: level only be LevelMarker type for paralel_intervals
 
     ArgumentInfo(name: str, is_keyword: bool, [default: Any])
 
@@ -622,6 +625,11 @@ class VarDecl(Decl):
     @property
     def is_scalar(self):
         return self.length == 0
+
+
+class SplitterDecl(Decl):
+    axis = attribute(of=Axis)
+    offst = attribute(of=int)
 
 
 @attribclass

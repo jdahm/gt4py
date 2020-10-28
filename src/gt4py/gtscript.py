@@ -30,6 +30,7 @@ from gt4py import definitions as gt_definitions
 from gt4py import utils as gt_utils
 from gt4py.lazy_stencil import LazyStencil
 from gt4py.stencil_builder import StencilBuilder
+from gt4py.utils.attrib import attribclass
 
 
 # GTScript builtins
@@ -71,6 +72,8 @@ builtins = {
     "externals",
     "computation",
     "interval",
+    "parallel",
+    "region",
     "__gtscript__",
     "__externals__",
     "__INLINED",
@@ -329,6 +332,18 @@ def lazy_stencil(
     return _decorator(definition)
 
 
+class Splitter:
+    def __init__(self, axis: str, offset: int):
+        self.axis = axis
+        self.offset = offset
+
+    def __repr__(self):
+        return f"Splitter(axis={self.axis}, offset={self.offset})"
+
+    def __str__(self):
+        return f"<{self.axis}{self.offset:+d}>"
+
+
 # GTScript builtins: domain axes
 class _Axis:
     def __init__(self, name: str):
@@ -340,6 +355,12 @@ class _Axis:
 
     def __str__(self):
         return self.name
+
+    def __getitem__(self, interval):
+        return (
+            Splitter(axis=self.name, offset=interval.start),
+            Splitter(axis=self.name, offset=interval.stop),
+        )
 
 
 I = _Axis("I")
@@ -453,6 +474,21 @@ def computation(order):
 def interval(start, end):
     """Define the interval of computation in the 'K' sequential axis."""
     pass
+
+
+def parallel(*args):
+    """Define restricted computations in the parallel 'I-J' plane."""
+    pass
+
+
+class _Region:
+    """Frontend region specification used for getitem syntax."""
+
+    def __getitem__(self, *intervals):
+        return tuple((interval.start, interval.stop) for interval in intervals[0])
+
+
+region = _Region()
 
 
 def __INLINED(compile_if_expression):
