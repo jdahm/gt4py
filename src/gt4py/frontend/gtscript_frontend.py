@@ -22,7 +22,7 @@ import itertools
 import numbers
 import textwrap
 import types
-from typing import List
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -193,6 +193,11 @@ class ValueInliner(ast.NodeTransformer):
         node.body = [self.visit(n) for n in node.body]
         return node
 
+    def visit_Call(self, node: ast.Call):
+        if isinstance(node.func, ast.Name) and node.func.id != "parallel":
+            self.generic_visit(node)
+        return node
+
 
 class ReturnReplacer(ast.NodeTransformer):
     @classmethod
@@ -306,6 +311,9 @@ class CallInliner(ast.NodeTransformer):
         call_ast = copy.deepcopy(call_info["ast"])
         CallInliner.apply(call_ast, call_info["local_context"])
 
+        # Add splitters to parent annotation
+        self.annotation["splitters"] |= call_info["splitters"]
+
         # Extract call arguments
         call_signature = call_info["api_signature"]
         arg_infos = {arg.name: arg.default for arg in call_signature}
@@ -362,7 +370,10 @@ class CallInliner(ast.NodeTransformer):
         template_fmt = "{name}__" + call_id_suffix
 
         gt_meta.map_symbol_names(
-            call_ast, name_mapping, template_fmt=template_fmt, skip_names=self.all_skip_names
+            call_ast,
+            name_mapping,
+            template_fmt=template_fmt,
+            skip_names=set(self.all_skip_names | self.annotation["splitters"]),
         )
 
         # Replace returns by assignments in subroutine
@@ -423,7 +434,7 @@ class CallInliner(ast.NodeTransformer):
     def visit_Expr(self, node: ast.Expr):
         """ignore pure string statements in callee"""
         if not isinstance(node.value, ast.Str):
-            return super().visit_Expr(node)
+            return super().visit(node)
 
 
 class CompiledIfInliner(ast.NodeTransformer):
@@ -457,6 +468,99 @@ class CompiledIfInliner(ast.NodeTransformer):
                 )
 
         return node if node else None
+
+
+# class RegionExtractor(ast.NodeVisitor):
+#     @classmethod
+#     def apply(cls, node: ast.Expr) -> List[gt_ir.AxisInterval]:
+#         return cls().visit(node)
+
+#     def visit_Name(self, node: ast.Name) -> Tuple[None, int]:
+#         if node.id not in self.splitters:
+#             raise GTScriptSyntaxError(
+#                 f"{node.id} is not a defined splitter", loc=gt_ir.Location.from_ast_node(node)
+#             )
+#         return (gt_ir.VarRef(name=node.id), 0)
+
+#     def visit_Constant(self, node: ast.Constant) -> Tuple[None, int]:
+#         return (None, int(node.value))
+
+#     def visit_Num(self, node: ast.Num) -> Tuple[None, int]:
+#         return (None, int(node.n))
+
+#     def visit_BinOp(self, node: ast.BinOp) -> Tuple[Optional[gt_ir.VarRef], int]:
+#         left_level, left_offset = self.visit(node.left)
+#         right_level, right_offset = self.visit(node.right)
+
+#         if left_level and right_level and left_level != right_level:
+#             raise GTScriptSyntaxError("Cannot only use one splitter in each slice expression")
+
+#         level = left_level if left_level else right_level
+
+#         if isinstance(node.op, ast.Add):
+#             offset = left_offset + right_offset
+#         elif isinstance(node.op, ast.Sub):
+#             offset = left_offset - right_offset
+#         else:
+#             raise GTScriptSyntaxError(
+#                 "Only addition and subtraction are allowed operators on splitter values",
+#                 loc=gt_ir.Location.from_ast_node(node),
+#             )
+
+#         return (level, offset)
+
+#     def visit_Subscript(self, node: ast.Subscript) -> List[gt_ir.AxisInterval]:
+#         # There is some variability with different versions of Python in what node.slice holds
+#         if isinstance(node.slice, ast.ExtSlice):
+#             slices = node.slice.dims
+#         elif isinstance(node.slice, ast.Index):
+#             slices = node.slice.value.elts
+#         elif isinstance(node.slice, ast.Slice):
+#             raise NotImplementedError("Subscript must contain a tuple of slices.")
+#         else:
+#             raise SyntaxError("Unhandled case. Please report this as a bug.")
+
+#         slice_tuple = tuple(
+#             axis_slice.value if isinstance(axis_slice, ast.Index) else axis_slice
+#             for axis_slice in slices
+#         )
+
+#         parallel_interval = []
+#         for axis_slice in slice_tuple:
+#             if isinstance(axis_slice, ast.Slice):
+#                 if axis_slice.lower is None:
+#                     offset = 0
+#                     level = gt_ir.LevelMarker.START
+#                 else:
+#                     level, offset = self.visit(axis_slice.lower)
+#                 lower = gt_ir.AxisBound(level=level, offset=offset)
+
+#                 if axis_slice.upper is None:
+#                     offset = 0
+#                     level = gt_ir.LevelMarker.END
+#                 else:
+#                     level, offset = self.visit(axis_slice.upper)
+#                 upper = gt_ir.AxisBound(level=level, offset=offset)
+#             else:
+#                 level, offset = self.visit(axis_slice)
+#                 lower = gt_ir.AxisBound(level=level, offset=offset)
+#                 upper = gt_ir.AxisBound(level=level, offset=offset + 1)
+
+#             parallel_interval.append(
+#                 gt_ir.AxisInterval(start=lower, end=upper, loc=gt_ir.Location.from_ast_node(node))
+#             )
+
+#         return tuple(parallel_interval)
+
+#     def visit_Call(self, node: ast.Call) -> List[List[gt_ir.AxisInterval]]:
+#         """Top-level call for the RegionExtractor."""
+#         return [self.visit(arg) for arg in node.args]
+
+
+class IntervalNodeParser:
+    @classmethod
+    def apply(cls, node: ast.Expr) -> List[gt_ir.AxisInterval]:
+        return cls().visit(node)
 
 
 #
@@ -509,12 +613,6 @@ class CompiledIfInliner(ast.NodeTransformer):
 #         for a in ["defines", "reads", "writes"]:
 #             print(f"{a}: ", getattr(self, a))
 #
-
-
-@enum.unique
-class ParsingContext(enum.Enum):
-    CONTROL_FLOW = 1
-    COMPUTATION = 2
 
 
 class IRMaker(ast.NodeVisitor):
@@ -572,7 +670,6 @@ class IRMaker(ast.NodeVisitor):
             and isinstance(ast_root.body[0], ast.FunctionDef)
         )
         func_ast = ast_root.body[0]
-        self.parsing_context = ParsingContext.CONTROL_FLOW
         computations = self.visit(func_ast)
 
         return computations
@@ -704,6 +801,7 @@ class IRMaker(ast.NodeVisitor):
         # Parse computation specification, i.e. `withItems` nodes
         iteration_order = None
         interval = None
+        parallel_intervals = [None]
 
         try:
             for item in node.items:
@@ -719,6 +817,12 @@ class IRMaker(ast.NodeVisitor):
                 ):
                     assert interval is None  # only one spec allowed
                     interval = self._visit_interval_node(item, loc)
+                elif (
+                    isinstance(item.context_expr, ast.Call)
+                    and item.context_expr.func.id == "parallel"
+                ):
+                    assert parallel_intervals == [None]
+                    parallel_intervals = RegionExtractor.apply(item.context_expr)
                 else:
                     raise syntax_error
         except AssertionError as e:
@@ -728,17 +832,19 @@ class IRMaker(ast.NodeVisitor):
             raise syntax_error
 
         #  Parse `With` body into computation blocks
-        self.parsing_context = ParsingContext.COMPUTATION
         stmts = []
         for stmt in node.body:
             stmts.extend(gt_utils.listify(self.visit(stmt)))
-        self.parsing_context = ParsingContext.CONTROL_FLOW
 
-        result = gt_ir.ComputationBlock(
-            interval=interval, iteration_order=iteration_order, body=gt_ir.BlockStmt(stmts=stmts)
-        )
-
-        return result
+        return [
+            gt_ir.ComputationBlock(
+                interval=interval,
+                iteration_order=iteration_order,
+                parallel_interval=parallel_interval,
+                body=gt_ir.BlockStmt(stmts=stmts),
+            )
+            for parallel_interval in parallel_intervals
+        ]
 
     # Visitor methods
     # -- Special nodes --
@@ -1021,6 +1127,32 @@ class IRMaker(ast.NodeVisitor):
         ast.copy_location(assignment, node)
         return self.visit_Assign(assignment)
 
+    def _unroll_computations(self, node: ast.With):
+        def recurse_unroll(node, index, items):
+            if isinstance(node.body[index], ast.With):
+                unrolled_blocks = recurse_unroll(
+                    node.body[index], 0, items + node.body[index].items
+                )
+                processed_stmts = 1
+            else:
+                new_body = list(
+                    itertools.takewhile(
+                        lambda stmt: not isinstance(stmt, ast.With), node.body[index:]
+                    )
+                )
+                unrolled_blocks = [
+                    ast.copy_location(ast.With(items=items, body=new_body), node.body[index])
+                ]
+
+                processed_stmts = len(new_body)
+
+            if index + processed_stmts < len(node.body):
+                unrolled_blocks.extend(recurse_unroll(node, index + processed_stmts, items))
+
+            return unrolled_blocks
+
+        return recurse_unroll(node, 0, node.items) if len(node.body) > 0 else []
+
     def visit_With(self, node: ast.With):
         loc = gt_ir.Location.from_ast_node(node)
         syntax_error = GTScriptSyntaxError(
@@ -1035,48 +1167,35 @@ class IRMaker(ast.NodeVisitor):
         #  with computation(PARALLEL), interval(...):
         #    ...
         # otherwise just parse the node
-        if self.parsing_context == ParsingContext.CONTROL_FLOW and all(
-            isinstance(child_node, ast.With) for child_node in node.body
+
+        # Ensure top level `with` specifies the iteration order
+        if not any(
+            with_item.context_expr.func.id == "computation"
+            for with_item in node.items
+            if isinstance(with_item.context_expr, ast.Call)
         ):
-            # Ensure top level `with` specifies the iteration order
-            if not any(
-                with_item.context_expr.func.id == "computation"
-                for with_item in node.items
-                if isinstance(with_item.context_expr, ast.Call)
-            ):
-                raise syntax_error
-
-            # Parse nested `with` blocks
-            compute_blocks = []
-            for with_node in node.body:
-                with_node = copy.deepcopy(with_node)  # Copy to avoid altering original ast
-                # Splice `withItems` of current/primary with statement into nested with
-                with_node.items.extend(node.items)
-
-                compute_blocks.append(self._visit_computation_node(with_node))
-
-            # Validate block specification order
-            #  the nested computation blocks must be specified in their order of execution. The order of execution is
-            #  such that the lowest (highest) interval is processed first if the iteration order is forward (backward).
-            if not self._are_blocks_sorted(compute_blocks):
-                raise GTScriptSyntaxError(
-                    f"Invalid 'with' statement at line {loc.line} (column {loc.column}). Intervals must be specified in order of execution."
-                )
-
-            return compute_blocks
-        elif self.parsing_context == ParsingContext.CONTROL_FLOW and not any(
-            isinstance(child_node, ast.With) for child_node in node.body
-        ):
-            return self._visit_computation_node(node)
-        else:
-            # Mixing nested `with` blocks with stmts not allowed
             raise syntax_error
+
+        # Parse nested `with` blocks
+        compute_blocks = []
+        for with_node in self._unroll_computations(node):
+            compute_blocks.extend(self._visit_computation_node(with_node))
+
+        # Validate block specification order
+        #  the nested computation blocks must be specified in their order of execution. The order of execution is
+        #  such that the lowest (highest) interval is processed first if the iteration order is forward (backward).
+        if not self._are_blocks_sorted(compute_blocks):
+            raise GTScriptSyntaxError(
+                f"Invalid 'with' statement at line {loc.line} (column {loc.column}). Intervals must be specified in order of execution."
+            )
+
+        return compute_blocks
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> list:
         blocks = []
         docstring = ast.get_docstring(node)
         for stmt in node.body:
-            blocks.extend(gt_utils.listify(self.visit(stmt)))
+            blocks.extend(self.visit(stmt))
 
         if not all(isinstance(item, gt_ir.ComputationBlock) for item in blocks):
             raise GTScriptSyntaxError(
@@ -1248,7 +1367,7 @@ class GTScriptParser(ast.NodeVisitor):
                         collected_name, name_nodes[collected_name]
                     )
                 elif root_name in context:
-                    nonlocal_symbols[collected_name] = GTScriptParser.eval_constant(
+                    nonlocal_symbols[collected_name] = GTScriptParser.eval_external(
                         collected_name,
                         context,
                         gt_ir.Location.from_ast_node(name_nodes[collected_name][0]),
@@ -1262,10 +1381,15 @@ class GTScriptParser(ast.NodeVisitor):
         return nonlocal_symbols, imported_symbols
 
     @staticmethod
-    def eval_constant(name: str, context: dict, loc=None):
+    def eval_external(name: str, context: dict, loc: gt_ir.Location = None):
         try:
             value = eval(name, context)
-            assert value is None or isinstance(value, GTScriptParser.CONST_VALUE_TYPES)
+            assert (
+                value is None
+                or isinstance(value, GTScriptParser.CONST_VALUE_TYPES)  # a constant
+                or isinstance(value, gtscript._AxisInterval)
+                or isinstance(value, gtscript._AxisSplitter)
+            )
             assert not isinstance(value, types.FunctionType) or hasattr(value, "_gtscript_")
 
         except Exception as e:
@@ -1295,7 +1419,7 @@ class GTScriptParser(ast.NodeVisitor):
                         resolved_values_list.append(
                             (
                                 attr_name,
-                                GTScriptParser.eval_constant(
+                                GTScriptParser.eval_external(
                                     attr_name, context, gt_ir.Location.from_ast_node(attr_nodes[0])
                                 ),
                             )
@@ -1303,7 +1427,7 @@ class GTScriptParser(ast.NodeVisitor):
 
                 elif not exhaustive:
                     resolved_values_list.append(
-                        (name, GTScriptParser.eval_constant(name, context))
+                        (name, GTScriptParser.eval_external(name, context))
                     )
 
             for name, value in resolved_values_list:
@@ -1440,8 +1564,11 @@ class GTScriptParser(ast.NodeVisitor):
             self.external_context,
             exhaustive=False,
         )
+
+        # Checks compile-time assertions and removes these from the AST
         AssertionChecker.apply(main_func_node, context=local_context, source=self.source)
 
+        # Inlines constant values (skips AxisSplitters and AxisIntervals)
         ValueInliner.apply(main_func_node, context=local_context)
 
         # Inline function calls

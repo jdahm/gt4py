@@ -737,13 +737,37 @@ class TestAnnotations:
         assert len(annotations) == 6
 
 
+class TestNewSyntax:
+    def test_interval(self):
+        module = f"TestNewItervalSyntax_interval_{id_version}"
+        externals = {}
+
+        def definition_func(field: gtscript.Field[float]):
+            with computation(PARALLEL), interval(K[:]):
+                field = 0
+
+        compile_definition(definition_func, "test_interval", module, externals=externals)
+
+
 class TestParallelIntervals:
-    def test_splitter_grammar(self):
-        module = f"TestInlinedExternals_test_module_{id_version}"
+    def test_basic(self):
+        module = f"TestParallelIntervals_basic_{id_version}"
         externals = {}
 
         def definition_func(field: gtscript.Field[float]):
             with computation(PARALLEL), interval(...), parallel(region[I[0], :]):
                 field = 0
 
-        compile_definition(definition_func, "test_splitter_grammar", module, externals=externals)
+        compile_definition(definition_func, "test_basic", module, externals=externals)
+
+    def test_splitter(self):
+        module = f"TestParallelIntervals_splitter_{id_version}"
+        externals = {"istart": gtscript.I[0]}
+
+        def definition_func(field: gtscript.Field[float]):
+            from __externals__ import istart
+
+            with computation(PARALLEL), interval(...), parallel(region[istart, :]):
+                field = 0
+
+        compile_definition(definition_func, "test_splitter", module, externals=externals)

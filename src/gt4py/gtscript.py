@@ -69,6 +69,7 @@ builtins = {
     "PARALLEL",
     "Field",
     "Sequence",
+    "Splitter",
     "externals",
     "computation",
     "interval",
@@ -332,16 +333,30 @@ def lazy_stencil(
     return _decorator(definition)
 
 
-class Splitter:
+class _AxisSplitter:
     def __init__(self, axis: str, offset: int):
         self.axis = axis
         self.offset = offset
 
     def __repr__(self):
-        return f"Splitter(axis={self.axis}, offset={self.offset})"
+        return f"_AxisSplitter(axis={self.axis}, offset={self.offset})"
 
     def __str__(self):
-        return f"<{self.axis}{self.offset:+d}>"
+        return f"{self.axis}[{self.offset}]"
+
+
+class _AxisInterval:
+    def __init__(self, axis: str, start: int, stop: int):
+        assert start < stop
+        self.axis = axis
+        self.start = start
+        self.stop = stop
+
+    def __repr__(self):
+        return f"_AxisInterval(axis={self.axis}, start={self.start}, stop={self.stop})"
+
+    def __str__(self):
+        return f"{self.axis}[{self.start:+d}:{self.stop}]"
 
 
 # GTScript builtins: domain axes
@@ -357,10 +372,12 @@ class _Axis:
         return self.name
 
     def __getitem__(self, interval):
-        return (
-            Splitter(axis=self.name, offset=interval.start),
-            Splitter(axis=self.name, offset=interval.stop),
-        )
+        if isinstance(interval, slice):
+            return _AxisInterval(self.name, interval.start, interval.stop)
+        elif isinstance(interval, int):
+            return _AxisSplitter(self.name, interval)
+        else:
+            raise TypeError("Unrecognized index type")
 
 
 I = _Axis("I")
