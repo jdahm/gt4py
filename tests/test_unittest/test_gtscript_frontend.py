@@ -735,3 +735,15 @@ class TestAnnotations:
         assert "wb" in annotations
         assert annotations["wb"] == int
         assert len(annotations) == 6
+
+
+class TestParallelIntervals:
+    def test_splitter_grammar(self):
+        module = f"TestInlinedExternals_test_module_{id_version}"
+        externals = {}
+
+        def definition_func(field: gtscript.Field[float]):
+            with computation(PARALLEL), interval(...), parallel(region[I[0], :]):
+                field = 0
+
+        compile_definition(definition_func, "test_splitter_grammar", module, externals=externals)
