@@ -56,24 +56,16 @@ class DebugSourceGenerator(PythonSourceGenerator):
         else:
             range_args = [loop_bounds[1] + " -1", loop_bounds[0] + " -1", "-1"]
 
-        if range_args != self.range_args:
-            self.range_args = range_args
-            range_expr = "range({args})".format(args=", ".join(a for a in range_args))
-            seq_axis = self.impl_node.domain.sequential_axis.name
-            source_lines.append(
-                "for {ax} in {range_expr}:".format(ax=seq_axis, range_expr=range_expr)
-            )
+        range_expr = "range({args})".format(args=", ".join(a for a in range_args))
+        seq_axis = self.impl_node.domain.sequential_axis.name
+        source_lines.append("for {ax} in {range_expr}:".format(ax=seq_axis, range_expr=range_expr))
 
         return source_lines
 
     def make_temporary_field(
-        self,
-        name: str,
-        dtype: gt_ir.DataType,
-        extent: gt_definitions.Extent,
-        axes: list = gt_definitions.CartesianSpace.names,
+        self, name: str, dtype: gt_ir.DataType, extent: gt_definitions.Extent
     ):
-        source_lines = super().make_temporary_field(name, dtype, extent, axes)
+        source_lines = super().make_temporary_field(name, dtype, extent)
         source_lines.extend(self._make_field_accessor(name, extent.to_boundary().lower_indices))
 
         return source_lines
@@ -123,6 +115,7 @@ class DebugSourceGenerator(PythonSourceGenerator):
             "{ax}{offset:+d}".format(ax=ax, offset=node.offset[ax]) if ax in node.offset else ""
             for ax in self.impl_node.fields[node.name].axes
         ]
+
         index_str = f"({index[0]},)" if len(index) == 1 else ", ".join(index)
         source = "{name}{marker}[{index}]".format(
             marker=self.origin_marker, name=node.name, index=index_str

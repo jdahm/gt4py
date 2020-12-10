@@ -88,17 +88,13 @@ class NumPySourceGenerator(PythonSourceGenerator):
             range_args = [loop_bounds[1] + " -1", loop_bounds[0] + " -1", "-1"]
 
         if iteration_order != gt_ir.IterationOrder.PARALLEL:
-            if self.range_args != range_args:
-                self.range_args = range_args
-                range_expr = "range({args})".format(args=", ".join(a for a in range_args))
-                seq_axis = self.impl_node.domain.sequential_axis.name
-                source_lines.append(
-                    "for {ax} in {range_expr}:".format(ax=seq_axis, range_expr=range_expr)
-                )
+            range_expr = "range({args})".format(args=", ".join(a for a in range_args))
+            seq_axis = self.impl_node.domain.sequential_axis.name
+            source_lines.append(
+                "for {ax} in {range_expr}:".format(ax=seq_axis, range_expr=range_expr)
+            )
             source_lines.extend(" " * self.indent_size + line for line in body_sources)
         else:
-            # Clear range args on parallel intervals
-            self.range_args.clear()
             source_lines.append(
                 "{interval_k_start_name} = {lb}".format(
                     interval_k_start_name=self.interval_k_start_name, lb=loop_bounds[0]
@@ -114,13 +110,9 @@ class NumPySourceGenerator(PythonSourceGenerator):
         return source_lines
 
     def make_temporary_field(
-        self,
-        name: str,
-        dtype: gt_ir.DataType,
-        extent: gt_definitions.Extent,
-        axes: list = gt_definitions.CartesianSpace.names,
-    ):
-        source_lines = super().make_temporary_field(name, dtype, extent, axes)
+        self, name: str, dtype: gt_ir.DataType, extent: gt_definitions.Extent
+    ) -> List[str]:
+        source_lines = super().make_temporary_field(name, dtype, extent)
         source_lines.extend(self._make_field_origin(name, extent.to_boundary().lower_indices))
 
         return source_lines
