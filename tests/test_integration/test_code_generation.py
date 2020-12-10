@@ -24,7 +24,13 @@ from gt4py import backend as gt_backend
 from gt4py import gtscript
 from gt4py import storage as gt_storage
 
-from ..definitions import ALL_BACKENDS, CPU_BACKENDS, GPU_BACKENDS, INTERNAL_BACKENDS
+from ..definitions import (
+    ALL_BACKENDS,
+    CPU_BACKENDS,
+    GPU_BACKENDS,
+    INTERNAL_BACKENDS,
+    NONUMPY_BACKENDS,
+)
 from .stencil_definitions import EXTERNALS_REGISTRY as externals_registry
 from .stencil_definitions import REGISTRY as stencil_definitions
 
@@ -179,3 +185,91 @@ def test_stage_merger_induced_interval_block_reordering(backend):
 
     np.testing.assert_allclose(field_out.view(np.ndarray)[:, :, 0:-1], 3)
     np.testing.assert_allclose(field_out.view(np.ndarray)[:, :, -1], 2)
+
+
+@pytest.mark.parametrize("backend", NONUMPY_BACKENDS)
+def test_1d_fields(backend):
+    Field3D = gtscript.Field[np.float_]
+    Field1D = gtscript.Field[np.float_, gtscript.K]
+
+    @gtscript.stencil(backend=backend)
+    def k_field_stencil(in_field: Field3D, out_field: Field3D, sum1: Field1D):
+        with computation(FORWARD), interval(...):
+            if in_field > 0:
+                sum1 = sum1[-1] + in_field
+        with computation(BACKWARD), interval(...):
+            if in_field < 0.0 and sum1 >= 0:
+                out_field = sum1 if sum1 < in_field else in_field
+
+    in_field = gt_storage.ones(
+        dtype=np.float_, backend=backend, shape=(23, 23, 23), default_origin=(0, 0, 0)
+    )
+    out_field = gt_storage.ones(
+        dtype=np.float_, backend=backend, shape=(23, 23, 23), default_origin=(0, 0, 0)
+    )
+    sum_field = gt_storage.zeros(
+        dtype=np.float_,
+        backend=backend,
+        shape=(23,),
+        default_origin=(1,),
+        mask=(False, False, True),
+    )
+
+    k_field_stencil(in_field, out_field, sum_field, origin=(0, 0, 0))
+
+
+@pytest.mark.parametrize("backend", ALL_BACKENDS)
+def test_2d_fields(backend):
+    Field3D = gtscript.Field[np.float_]
+    Field2D = gtscript.Field[np.float_, gtscript.IJ]
+
+    @gtscript.stencil(backend=backend)
+    def vertical_sum(nums: Field3D, sums: Field2D):
+        with computation(FORWARD), interval(...):
+            sums += nums
+
+    nums = gt_storage.ones(
+        dtype=np.float_, backend=backend, shape=(23, 23, 23), default_origin=(0, 0, 0)
+    )
+    sums = gt_storage.zeros(
+        dtype=np.float_,
+        backend=backend,
+        shape=(23, 23),
+        default_origin=(0, 0),
+        mask=(True, True, False),
+    )
+
+    vertical_sum(nums, sums, origin=(0, 0, 0))
+
+
+@pytest.mark.parametrize("backend", ALL_BACKENDS)
+def test_lower_dimensional_inputs(backend):
+    @gtscript.stencil(backend=backend)
+    def stencil(
+        field_3d: gtscript.Field[np.float_, gtscript.IJK],
+        field_2d: gtscript.Field[np.float_, gtscript.IJ],
+        field_1d: gtscript.Field[np.float_, gtscript.K],
+    ):
+        with computation(PARALLEL), interval(0, 1):
+            field_2d = field_1d + field_3d
+
+        with computation(PARALLEL):
+            with interval(0, 1):
+                tmp = field_2d + field_1d
+                field_3d = tmp[1, 0, 0] + field_1d
+            with interval(1, None):
+                field_3d = tmp[-1, 0, 0]
+
+    full_shape = (6, 6, 3)
+    default_origin = (1, 1, 0)
+    dtype = float
+
+    field_3d = gt_storage.ones(backend, default_origin, full_shape, dtype, mask=None)
+    field_2d = gt_storage.ones(
+        backend, default_origin[:-1], full_shape[:-1], dtype, mask=(True, True, False)
+    )
+    field_1d = gt_storage.zeros(
+        backend, (default_origin[-1],), (full_shape[-1],), dtype, mask=(False, False, True)
+    )
+
+    stencil(field_3d, field_2d, field_1d, origin=(1, 1, 0))

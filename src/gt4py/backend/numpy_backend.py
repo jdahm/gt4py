@@ -191,8 +191,6 @@ class NumPySourceGenerator(PythonSourceGenerator):
                         idx=idx,
                     )
                 )
-        else:
-            index.append("0:1" if is_parallel else "0")
 
         source = "{name}[{index}]".format(name=node.name, index=", ".join(index))
 

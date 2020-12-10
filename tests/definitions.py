@@ -28,6 +28,7 @@ CPU_BACKENDS = [
 ]
 GPU_BACKENDS = list(set(ALL_BACKENDS) - set(CPU_BACKENDS))
 INTERNAL_BACKENDS = ["debug", "numpy"] + [name for name in ALL_BACKENDS if name.startswith("gt")]
+NONUMPY_BACKENDS = [name for name in ALL_BACKENDS if name != "numpy"]
 
 
 @pytest.fixture()

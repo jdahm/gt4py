@@ -120,11 +120,12 @@ class DebugSourceGenerator(PythonSourceGenerator):
     def visit_FieldRef(self, node: gt_ir.FieldRef):
         assert node.name in self.block_info.accessors
         index = [
-            "{ax}{offset:+d}".format(ax=ax, offset=node.offset[ax]) if ax in node.offset else "0"
-            for ax in self.domain.axes_names
+            "{ax}{offset:+d}".format(ax=ax, offset=node.offset[ax]) if ax in node.offset else ""
+            for ax in self.impl_node.fields[node.name].axes
         ]
+        index_str = f"({index[0]},)" if len(index) == 1 else ", ".join(index)
         source = "{name}{marker}[{index}]".format(
-            marker=self.origin_marker, name=node.name, index=", ".join(index)
+            marker=self.origin_marker, name=node.name, index=index_str
         )
 
         return source
