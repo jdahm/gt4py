@@ -242,7 +242,7 @@ def test_2d_fields(backend):
     vertical_sum(nums, sums, origin=(0, 0, 0))
 
 
-@pytest.mark.parametrize("backend", ALL_BACKENDS)
+@pytest.mark.parametrize("backend", NONUMPY_BACKENDS)
 def test_lower_dimensional_inputs(backend):
     @gtscript.stencil(backend=backend)
     def stencil(
