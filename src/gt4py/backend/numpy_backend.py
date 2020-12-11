@@ -146,21 +146,24 @@ class NumPySourceGenerator(PythonSourceGenerator):
 
         index = []
         for d in range(2):
-            start_expr = " {:+d}".format(lower_extent[d]) if lower_extent[d] != 0 else ""
-            size_expr = "{dom}[{d}]".format(dom=self.domain_arg_name, d=d)
-            size_expr += " {:+d}".format(upper_extent[d]) if upper_extent[d] != 0 else ""
-            index.append(
-                "{name}{marker}[{d}]{start}: {name}{marker}[{d}] + {size}".format(
-                    name=node.name,
-                    start=start_expr,
-                    marker=self.origin_marker,
-                    d=d,
-                    size=size_expr,
+            axis_name = self.impl_node.domain.parallel_axes[d].name
+            if axis_name in node.offset:
+                start_expr = " {:+d}".format(lower_extent[d]) if lower_extent[d] != 0 else ""
+                size_expr = "{dom}[{d}]".format(dom=self.domain_arg_name, d=d)
+                size_expr += " {:+d}".format(upper_extent[d]) if upper_extent[d] != 0 else ""
+                index.append(
+                    "{name}{marker}[{d}]{start}: {name}{marker}[{d}] + {size}".format(
+                        name=node.name,
+                        start=start_expr,
+                        marker=self.origin_marker,
+                        d=d,
+                        size=size_expr,
+                    )
                 )
-            )
 
         k_ax = self.domain.sequential_axis.name
         if k_ax in node.offset:
+            k_index = len(node.offset) - 1
             k_offset = node.offset.get(k_ax, 0)
             if is_parallel:
                 start_expr = self.interval_k_start_name
@@ -168,8 +171,12 @@ class NumPySourceGenerator(PythonSourceGenerator):
                 end_expr = self.interval_k_end_name
                 end_expr += " {:+d}".format(k_offset) if k_offset else ""
                 index.append(
-                    "{name}{marker}[2] + {start}:{name}{marker}[2] + {stop}".format(
-                        name=node.name, start=start_expr, marker=self.origin_marker, stop=end_expr
+                    "{name}{marker}[{d}] + {start}:{name}{marker}[{d}] + {stop}".format(
+                        name=node.name,
+                        start=start_expr,
+                        marker=self.origin_marker,
+                        d=k_index,
+                        stop=end_expr,
                     )
                 )
             else:
@@ -178,7 +185,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
                     "{name}{marker}[{d}] + {ax}{idx}".format(
                         name=node.name,
                         marker=self.origin_marker,
-                        d=len(self.domain.parallel_axes),
+                        d=k_index,
                         ax=k_ax,
                         idx=idx,
                     )

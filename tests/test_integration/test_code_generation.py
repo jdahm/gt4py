@@ -187,7 +187,7 @@ def test_stage_merger_induced_interval_block_reordering(backend):
     np.testing.assert_allclose(field_out.view(np.ndarray)[:, :, -1], 2)
 
 
-@pytest.mark.parametrize("backend", NONUMPY_BACKENDS)
+@pytest.mark.parametrize("backend", ALL_BACKENDS)
 def test_1d_fields(backend):
     Field3D = gtscript.Field[np.float_]
     Field1D = gtscript.Field[np.float_, gtscript.K]
