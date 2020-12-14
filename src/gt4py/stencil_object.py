@@ -303,8 +303,12 @@ class StencilObject(abc.ABC):
             origin = normalize_origin_mapping(origin)
 
         for name, field in used_field_args.items():
-            field_origin = origin["_all_"] if "_all_" in origin else field.default_origin
-            origin.setdefault(name, field_origin.filter_mask(field.mask))
+            field_origin = (
+                origin["_all_"].filter_mask(field.mask)
+                if "_all_" in origin
+                else field.default_origin
+            )
+            origin.setdefault(name, field_origin)
 
         # Domain
         if domain is None:
