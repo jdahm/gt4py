@@ -24,13 +24,7 @@ from gt4py import backend as gt_backend
 from gt4py import gtscript
 from gt4py import storage as gt_storage
 
-from ..definitions import (
-    ALL_BACKENDS,
-    CPU_BACKENDS,
-    GPU_BACKENDS,
-    INTERNAL_BACKENDS,
-    NONUMPY_BACKENDS,
-)
+from ..definitions import ALL_BACKENDS, CPU_BACKENDS, GPU_BACKENDS, INTERNAL_BACKENDS
 from .stencil_definitions import EXTERNALS_REGISTRY as externals_registry
 from .stencil_definitions import REGISTRY as stencil_definitions
 
@@ -195,10 +189,10 @@ def test_1d_fields(backend):
     @gtscript.stencil(backend=backend)
     def k_field_stencil(in_field: Field3D, out_field: Field3D, sum1: Field1D):
         with computation(FORWARD), interval(...):
-            if in_field > 0:
+            if in_field + sum1 > 0.0:
                 sum1 = sum1[-1] + in_field
         with computation(BACKWARD), interval(...):
-            if in_field < 0.0 and sum1 >= 0:
+            if in_field < 0.0 and sum1 >= 0.0:
                 out_field = sum1 if sum1 < in_field else in_field
 
     in_field = gt_storage.ones(
@@ -242,7 +236,35 @@ def test_2d_fields(backend):
     vertical_sum(nums, sums, origin=(0, 0, 0))
 
 
-@pytest.mark.parametrize("backend", NONUMPY_BACKENDS)
+@pytest.mark.parametrize("backend", ALL_BACKENDS)
+def test_2d_parallel_if(backend):
+    FloatD = gtscript.Field[np.float_]
+    Int2D = gtscript.Field[np.int, gtscript.IJ]
+
+    @gtscript.stencil(backend=backend)
+    def neg_z_counter(q: FloatD, zcnt: Int2D):
+        with computation(PARALLEL), interval(...):
+            if q < 0.0:
+                zcnt += 1
+
+    q = gt_storage.ones(
+        dtype=np.float_, backend=backend, shape=(5, 5, 5), default_origin=(0, 0, 0)
+    )
+    q[1::4, ::4] = -1
+    q[::4, 1::4] = -1
+    zcnt = gt_storage.zeros(
+        dtype=np.int,
+        backend=backend,
+        shape=(5, 5),
+        default_origin=(0, 0),
+        mask=(True, True, False),
+    )
+
+    # neg_z_counter(q, zcnt, domain=(5, 5, 5), origin=(0, 0, 0))
+    neg_z_counter(q, zcnt, origin=(0, 0, 0))
+
+
+@pytest.mark.parametrize("backend", ALL_BACKENDS)
 def test_lower_dimensional_inputs(backend):
     @gtscript.stencil(backend=backend)
     def stencil(
@@ -256,7 +278,7 @@ def test_lower_dimensional_inputs(backend):
         with computation(PARALLEL):
             with interval(0, 1):
                 tmp = field_2d + field_1d
-                field_3d = tmp[1, 0, 0] + field_1d
+                field_2d = tmp[1, 0, 0] + field_1d
             with interval(1, None):
                 field_3d = tmp[-1, 0, 0]
 
@@ -268,7 +290,7 @@ def test_lower_dimensional_inputs(backend):
     field_2d = gt_storage.ones(
         backend, default_origin[:-1], full_shape[:-1], dtype, mask=(True, True, False)
     )
-    field_1d = gt_storage.zeros(
+    field_1d = gt_storage.ones(
         backend, (default_origin[-1],), (full_shape[-1],), dtype, mask=(False, False, True)
     )
 

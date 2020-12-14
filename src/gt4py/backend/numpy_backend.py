@@ -109,6 +109,17 @@ class NumPySourceGenerator(PythonSourceGenerator):
             source_lines.extend("\n")
         return source_lines
 
+    def _shape_from_axes(self, name: str, axes: List[str]) -> List[str]:
+        shape = []
+        j = 0
+        for axis in self.domain.axes_names:
+            if axis in axes:
+                shape.append(f"{name}.shape[{j}]")
+                j += 1
+            else:
+                shape.append("1")
+        return shape
+
     def make_temporary_field(
         self, name: str, dtype: gt_ir.DataType, extent: gt_definitions.Extent
     ) -> List[str]:
@@ -160,6 +171,8 @@ class NumPySourceGenerator(PythonSourceGenerator):
                         size=size_expr,
                     )
                 )
+            else:
+                index.append("0")
 
         k_ax = self.domain.sequential_axis.name
         if k_ax in node.offset:
@@ -190,6 +203,8 @@ class NumPySourceGenerator(PythonSourceGenerator):
                         idx=idx,
                     )
                 )
+        else:
+            index.append("0:1" if is_parallel else "0")
 
         source = "{name}[{index}]".format(name=node.name, index=", ".join(index))
 
@@ -208,6 +223,15 @@ class NumPySourceGenerator(PythonSourceGenerator):
                         name=info.name, np=self.numpy_prefix
                     )
                 )
+                field_axes = node.fields[info.name].axes
+                if field_axes != self.domain.axes_names:
+                    shape = self._shape_from_axes(info.name, field_axes)
+                    self.sources.extend(
+                        "{name} = {name}.reshape(({shape}))".format(
+                            name=info.name,
+                            shape=", ".join(shape),
+                        )
+                    )
         self.sources.empty_line()
 
         super().visit_StencilImplementation(node)
