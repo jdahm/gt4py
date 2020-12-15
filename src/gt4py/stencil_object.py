@@ -117,6 +117,9 @@ class StencilObject(abc.ABC):
     def __call__(self, *args, **kwargs):
         pass
 
+    def _get_field_mask(self, field):
+        return field.mask if hasattr(field, "mask") else [True] * 3
+
     def _get_max_domain(self, field_args, origin):
         """Return the maximum domain size possible
 
@@ -135,10 +138,11 @@ class StencilObject(abc.ABC):
         """
         max_domain = Shape([np.iinfo(np.uintc).max] * self.domain_info.ndims)
         for name, field in field_args.items():
-            field_origin = Index.from_mask(origin[name], field.mask)
-            field_shape = Shape.from_mask(field.shape, field.mask)
+            field_origin = Index.from_mask(origin[name], self._get_field_mask(field))
+            field_shape = Shape.from_mask(field.shape, self._get_field_mask(field))
             upper_boundary = Index.from_mask(
-                self.field_info[name].boundary.upper_indices, field.mask
+                self.field_info[name].boundary.upper_indices,
+                self._get_field_mask(field),
             )
             max_domain &= field_shape - (field_origin + upper_boundary)
         return max_domain
@@ -206,8 +210,8 @@ class StencilObject(abc.ABC):
             )
         for name, field in used_field_args.items():
             min_origin = self.field_info[name].boundary.lower_indices
-            field_shape = Shape.from_mask(field.shape, field.mask)
-            field_origin = Index.from_mask(origin[name], field.mask)
+            field_shape = Shape.from_mask(field.shape, self._get_field_mask(field))
+            field_origin = Index.from_mask(origin[name], self._get_field_mask(field))
             if field_origin < min_origin:
                 raise ValueError(
                     f"Origin for field {name} too small. Must be at least {min_origin}, is {origin[name]}"
@@ -224,7 +228,14 @@ class StencilObject(abc.ABC):
                 )
 
     def _call_run(
-        self, field_args, parameter_args, domain, origin, *, validate_args=True, exec_info=None
+        self,
+        field_args,
+        parameter_args,
+        domain,
+        origin,
+        *,
+        validate_args=True,
+        exec_info=None,
     ):
         """Check and preprocess the provided arguments (called by :class:`StencilObject` subclasses).
 
@@ -304,7 +315,7 @@ class StencilObject(abc.ABC):
 
         for name, field in used_field_args.items():
             field_origin = (
-                origin["_all_"].filter_mask(field.mask)
+                origin["_all_"].filter_mask(self._get_field_mask(field))
                 if "_all_" in origin
                 else field.default_origin
             )
@@ -324,7 +335,11 @@ class StencilObject(abc.ABC):
             self._validate_args(used_field_args, used_param_args, domain, origin)
 
         self.run(
-            _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
+            _domain_=domain,
+            _origin_=origin,
+            exec_info=exec_info,
+            **field_args,
+            **parameter_args,
         )
 
         if exec_info is not None:
