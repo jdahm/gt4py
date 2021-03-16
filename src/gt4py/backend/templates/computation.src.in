@@ -17,6 +17,7 @@
  ---- Template variables ----
 
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
+    - tmp_arg_fields
     - constants: { name:str : str }
     - gt_backend: str
     - halo_sizes: [int]
@@ -162,6 +163,12 @@ static constexpr gt::uint_t halo_size_k = {{ halo_sizes[2] }};
 using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ field.layout_id }}, {{ field.selector | join(", ") | lower }}>::store_t>;
 {%- endfor %}
 {% set arg_counter = arg_counter + arg_fields|length %}
+{% for field in tmp_arg_fields %}
+using storage_info_t_{{ field.name }} = gt::storage_traits<backend_t>::storage_info_t<0 /* id */, 3 /* dims */, gt::halo<{{ field.halo | join(", ")}}>>;
+using data_store_t_{{ field.name }} = gt::storage_traits<backend_t>::data_store_t<{{ field.dtype }}, storage_info_t_{{ field.name }}>;
+using p_{{ field.name}} = gt::arg<{{ arg_counter + loop.index0 }}, data_store_t_{{ field.name }}>;
+{%- endfor %}
+{% set arg_counter = arg_counter + tmp_arg_fields|length %}
 {% for param in parameters %}
 using p_{{ param.name }} = gt::arg<{{ arg_counter + loop.index0 }}, gt::global_parameter<{{ param.dtype }}>>;
 {%- endfor %}
@@ -173,8 +180,8 @@ using p_domain_size_{{ axis_name }} = gt::arg<{{ arg_counter + loop.index0 }}, g
 {% set arg_counter = arg_counter + axes_names|length %}
 {%- endif -%}
 {% if tmp_fields -%}
-{%- for field in tmp_fields %}
 // All temporaries are 3D storages. For now...
+{%- for field in tmp_fields %}
 using p_{{ field.name }} = gt::tmp_arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, 0, 1, 1, 1>::store_t>;
 {%- endfor %}
 {% set arg_counter = arg_counter + tmp_fields|length %}
@@ -271,6 +278,12 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
     auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ field.layout_id }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
 {%- endfor %}
 
+    // Initialize tmp arg data stores from input buffers
+{% for field in tmp_arg_fields %}
+    auto storage_info_{{ field.name }} = storage_info_t_{{ field.name }}({{ field.domain_str }});
+    auto ds_{{ field.name }} = data_store_t_{{ field.name }}(storage_info_{{ field.name }}, 0., "{{ field.name }}");
+{% endfor %}
+
     // Run computation and wait for the synchronization of the output stores
 {%- if requires_positional %}
     auto gt_computation = gt::make_positional_computation<backend_t>(
@@ -320,8 +333,14 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
     gt_computation.run({%- set comma = joiner(", ") %}
 {%- for field in arg_fields -%}
                      {{ comma() }}p_{{ field.name }}()=ds_{{ field.name }}
+{%- endfor %}
+{%- for field in tmp_arg_fields -%}
+                     {{ comma() }}p_{{ field.name }}()=ds_{{ field.name }}
 {%- endfor %});
         // computation_.sync_bound_data_stores();
+{%- for field in tmp_arg_fields -%}
+                     ds_{{ field.name }}.sync();
+{%- endfor %});
 }
 
 }  // namespace {{ stencil_unique_name }}
