@@ -610,7 +610,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                                 ],
                                 "halo": [max(0, -x) for x in lower_indices],
                                 "domain_str": ", ".join(
-                                    f"domain[index]{ext:+d}".format(index=i, ext=ext)
+                                    "domain[{index}]{ext:+d}".format(index=i, ext=ext)
                                     for i, ext in enumerate(domain_ext)
                                 ),
                             }
