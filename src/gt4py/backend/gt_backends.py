@@ -18,7 +18,7 @@ import abc
 import functools
 import numbers
 import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type, Union
 
 import jinja2
 import numpy as np
@@ -341,6 +341,18 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return result
 
+    @property
+    def fields_in_horizontal_if(self) -> Set[str]:
+        names = []
+        for node in gt_ir.filter_nodes_dfs(self.impl_node, gt_ir.If):
+            if len(list(gt_ir.filter_nodes_dfs(node.condition, gt_ir.AxisIndex))):
+                # Assume this is a HorizontalIf
+                names.extend(
+                    [ref.name for ref in gt_ir.filter_nodes_dfs(node.main_body, gt_ir.FieldRef)]
+                )
+
+        return set(names).difference({param.name for param in self.impl_node.api_signature})
+
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral) -> str:
         source = "{dtype}{{{value}}}".format(
             dtype=self.DATA_TYPE_TO_CPP[node.data_type], value=node.value
@@ -561,7 +573,10 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 if value is not None:
                     constants[name] = value
 
+        fields_in_horizontal_if = self.fields_in_horizontal_if
+
         arg_fields = []
+        tmp_arg_fields = []
         tmp_fields = []
         storage_ids = []
         max_ndim = 0
@@ -577,11 +592,31 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                         axis in field_decl.axes for axis in self.impl_node.domain.axes_names
                     ),
                 }
-                if field_decl.is_api:
+                if field_decl.is_api or name in fields_in_horizontal_if:
                     if field_decl.layout_id not in storage_ids:
                         storage_ids.append(field_decl.layout_id)
                     field_attributes["layout_id"] = storage_ids.index(field_decl.layout_id)
-                    arg_fields.append(field_attributes)
+                    if name in fields_in_horizontal_if:
+                        lower_indices = self.impl_node.fields_extents[name].lower_indices
+                        upper_indices = self.impl_node.fields_extents[name].upper_indices
+                        domain_ext = [
+                            upper - lower for upper, lower in zip(upper_indices, lower_indices)
+                        ]
+                        tmp_arg_fields.append(
+                            {
+                                "name": name,
+                                "dtype": self.DATA_TYPE_TO_CPP[
+                                    self.impl_node.fields[name].data_type
+                                ],
+                                "halo": [max(0, -x) for x in lower_indices],
+                                "domain_str": ", ".join(
+                                    f"domain[index]{ext:+d}".format(index=i, ext=ext)
+                                    for i, ext in enumerate(domain_ext)
+                                ),
+                            }
+                        )
+                    else:
+                        arg_fields.append(field_attributes)
                 else:
                     tmp_fields.append(field_attributes)
         tmp_fields = list(sorted(tmp_fields, key=lambda field: field["name"]))
@@ -606,6 +641,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         template_args = dict(
             arg_fields=arg_fields,
+            tmp_arg_fields=tmp_arg_fields,
             constants=constants,
             gt_backend=self.gt_backend_t,
             halo_sizes=halo_sizes,
