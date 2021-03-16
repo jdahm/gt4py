@@ -18,7 +18,7 @@ import abc
 import functools
 import numbers
 import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 
 import jinja2
 import numpy as np
@@ -341,18 +341,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return result
 
-    @property
-    def fields_in_horizontal_if(self) -> Set[str]:
-        names = []
-        for node in gt_ir.filter_nodes_dfs(self.impl_node, gt_ir.If):
-            if len(list(gt_ir.filter_nodes_dfs(node.condition, gt_ir.AxisIndex))):
-                # Assume this is a HorizontalIf
-                names.extend(
-                    [ref.name for ref in gt_ir.filter_nodes_dfs(node.main_body, gt_ir.FieldRef)]
-                )
-
-        return set(names).difference({param.name for param in self.impl_node.api_signature})
-
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral) -> str:
         source = "{dtype}{{{value}}}".format(
             dtype=self.DATA_TYPE_TO_CPP[node.data_type], value=node.value
@@ -595,7 +583,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         template_args = dict(
             arg_fields=arg_fields,
-            tmp_arg_fields=tmp_arg_fields,
             constants=constants,
             gt_backend=self.gt_backend_t,
             halo_sizes=halo_sizes,
@@ -650,88 +637,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         return arg_fields, tmp_arg_fields, tmp_fields
 
 
-class GTPyModuleGenerator(gt_backend.PyExtModuleGenerator):
-    @property
-    def fields_in_horizontal_if(self) -> Set[str]:
-        names = []
-        for node in gt_ir.filter_nodes_dfs(self.builder.implementation_ir, gt_ir.If):
-            if len(list(gt_ir.filter_nodes_dfs(node.condition, gt_ir.AxisIndex))):
-                # Assume this is a HorizontalIf
-                names.extend(
-                    [ref.name for ref in gt_ir.filter_nodes_dfs(node.main_body, gt_ir.FieldRef)]
-                )
-
-        return set(names).difference(
-            {param.name for param in self.builder.implementation_ir.api_signature}
-        )
-
-    def generate_imports(self) -> str:
-        return (
-            """
-from gt4py import storage as gt_storage
-        """
-            + super().generate_imports()
-        )
-
-    def generate_implementation(self) -> str:
-        definition_ir = self.builder.definition_ir
-        sources = gt_utils.text.TextBlock(indent_size=self.TEMPLATE_INDENT_SIZE)
-
-        api_field_args = []
-        parameter_args = []
-        api_fields = set(field.name for field in definition_ir.api_fields)
-        for arg in definition_ir.api_signature:
-            if arg.name not in self.args_data["unreferenced"]:
-                if arg.name in api_fields:
-                    api_field_args.append(arg.name)
-                    api_field_args.append("list(_origin_['{}'])".format(arg.name))
-                else:
-                    parameter_args.append(arg.name)
-
-        allocations = []
-        tmp_field_args = []
-        for name in self.fields_in_horizontal_if:
-            upper_indices = self.builder.implementation_ir.fields_extents[name].upper_indices
-            lower_indices = self.builder.implementation_ir.fields_extents[name].lower_indices
-            dtype = self.builder.implementation_ir.fields[name].data_type.dtype
-            origin_values = [max(0, -x) for x in lower_indices]
-            shape_adds = [upper - lower for upper, lower in zip(upper_indices, lower_indices)]
-            shape = (
-                "["
-                + ", ".join([f"_domain_[{i}] + {shape_adds[i]}" for i in range(len(shape_adds))])
-                + "]"
-            )
-            origin_str = "[" + ", ".join([str(x) for x in origin_values]) + "]"
-            allocations.append(
-                f'storage_{name} = gt_storage.empty("{self.builder.backend.name}", default_origin={origin_str}, shape={shape}, dtype=np.{dtype})'
-            )
-            tmp_field_args.append(f"storage_{name}")
-            tmp_field_args.append(origin_str)
-
-        # Field args must precede parameter args
-        args = api_field_args
-        args.extend(tmp_field_args)
-        args.extend(parameter_args)
-
-        # only generate implementation if any multi_stages are present. e.g. if no statement in the
-        # stencil has any effect on the API fields, this may not be the case since they could be
-        # pruned.
-        if self.builder.implementation_ir.has_effect:
-            source = """
-{allocations}
-# Load or generate a GTComputation object for the current domain size
-pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
-""".format(
-                allocations="\n".join(allocations),
-                run_args=", ".join(args),
-            )
-            sources.extend(source.splitlines())
-        else:
-            sources.extend("\n")
-
-        return sources.text
-
-
 class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
 
     GT_BACKEND_OPTS = {
@@ -743,7 +648,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
 
     GT_BACKEND_T: str
 
-    MODULE_GENERATOR_CLASS = GTPyModuleGenerator
+    MODULE_GENERATOR_CLASS = gt_backend.PyExtModuleGenerator
 
     PYEXT_GENERATOR_CLASS = GTPyExtGenerator
 
@@ -895,7 +800,7 @@ class GTMCBackend(BaseGTBackend):
         return self.make_extension(uses_cuda=False)
 
 
-class GTCUDAPyModuleGenerator(GTPyModuleGenerator):
+class GTCUDAPyModuleGenerator(gt_backend.CUDAPyExtModuleGenerator):
     def generate_implementation(self) -> str:
         source = (
             super().generate_implementation()
