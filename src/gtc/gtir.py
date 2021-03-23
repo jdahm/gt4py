@@ -27,12 +27,13 @@ Analysis is required to generate valid code (complying with the parallel model)
 - `FieldIfStmt` expansion to comply with the parallel model
 """
 
+import enum
 from typing import Any, Generator, List, Set, Tuple, Union
 
 from pydantic import validator
 from pydantic.class_validators import root_validator
 
-from eve import Node, Str, SymbolName, SymbolTableTrait, utils
+from eve import IntEnum, Node, Str, SymbolName, SymbolTableTrait, utils
 from eve.iterators import TreeIterationItem
 from eve.typingx import RootValidatorValuesType
 from gtc import common
@@ -189,21 +190,16 @@ class ScalarDecl(Decl):
     pass
 
 
-class AxisStart:
-    pass
+@enum.unique
+class AxisEndpoint(IntEnum):
+    START = 0
+    END = 1
 
 
-class AxisEnd:
-    pass
-
-
-# Make an algebraic data type
-HorizontalAxisBound = Union[AxisBound, AxisStart, AxisEnd]
-
-
-class HorizontalInterval:
-    start: HorizontalAxisBound
-    end: HorizontalAxisBound
+class HorizontalInterval(LocNode):
+    # An algebraic data type
+    start: Union[AxisBound, AxisEndpoint]
+    end: Union[AxisBound, AxisEndpoint]
 
 
 class Interval(LocNode):
@@ -211,7 +207,7 @@ class Interval(LocNode):
     end: AxisBound
 
 
-class HorizontalSpecialization:
+class HorizontalSpecialization(LocNode):
     """Restrict execution of statements to a portion of the horizontal axes."""
 
     intervals: List[HorizontalInterval]
