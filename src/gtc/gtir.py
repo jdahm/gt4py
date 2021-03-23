@@ -27,7 +27,7 @@ Analysis is required to generate valid code (complying with the parallel model)
 - `FieldIfStmt` expansion to comply with the parallel model
 """
 
-from typing import Any, Dict, Generator, List, Set, Tuple
+from typing import Any, Generator, List, Set, Tuple, Union
 
 from pydantic import validator
 from pydantic.class_validators import root_validator
@@ -63,17 +63,8 @@ class Literal(common.Literal, Expr):  # type: ignore
     pass
 
 
-class CartesianOffset(Node):
-    i: int
-    j: int
-    k: int
-
-    @classmethod
-    def zero(cls) -> "CartesianOffset":
-        return cls(i=0, j=0, k=0)
-
-    def to_dict(self) -> Dict[str, int]:
-        return {"i": self.i, "j": self.j, "k": self.k}
+class CartesianOffset(common.CartesianOffset):
+    pass
 
 
 class ScalarAccess(common.ScalarAccess, Expr):  # type: ignore
@@ -198,9 +189,33 @@ class ScalarDecl(Decl):
     pass
 
 
+class AxisStart:
+    pass
+
+
+class AxisEnd:
+    pass
+
+
+# Make an algebraic data type
+HorizontalAxisBound = Union[AxisBound, AxisStart, AxisEnd]
+
+
+class HorizontalInterval:
+    start: HorizontalAxisBound
+    end: HorizontalAxisBound
+
+
 class Interval(LocNode):
     start: AxisBound
     end: AxisBound
+
+
+class HorizontalSpecialization:
+    """Restrict execution of statements to a portion of the horizontal axes."""
+
+    intervals: List[HorizontalInterval]
+    body: List[Stmt]
 
 
 # TODO(havogt) should vertical loop open a scope?
