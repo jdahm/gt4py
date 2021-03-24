@@ -16,14 +16,7 @@
 
 import pytest
 from tests.definition_setup import ijk_domain  # noqa: F401
-from tests.definition_setup import (
-    BlockStmt,
-    IterationOrder,
-    TAssign,
-    TComputationBlock,
-    TDefinition,
-    TFieldRef,
-)
+from tests.definition_setup import TAssign, TComputationBlock, TDefinition, TFieldRef
 
 from gt4py.backend.gtc_backend.defir_to_gtir import DefIRToGTIR
 from gt4py.ir.nodes import (
@@ -31,8 +24,11 @@ from gt4py.ir.nodes import (
     AxisInterval,
     BinaryOperator,
     BinOpExpr,
+    BlockStmt,
     DataType,
     FieldDecl,
+    HorizontalIf,
+    IterationOrder,
     LevelMarker,
     ScalarLiteral,
 )
@@ -145,6 +141,48 @@ def test_field_decl(defir_to_gtir):
     assert isinstance(gtir_decl, gtir.FieldDecl)
     assert gtir_decl.name == "a"
     assert gtir_decl.dtype == common.DataType.BOOL
+
+
+@pytest.mark.parametrize(
+    ["interval", "expected"],
+    (
+        (
+            AxisInterval(
+                start=AxisBound(level=LevelMarker.START, offset=-10000),
+                end=AxisBound(level=LevelMarker.START, offset=0),
+            ),
+            gtir.HorizontalInterval(
+                start=gtir.AxisEndpoint.START,
+                end=gtir.AxisBound(level=common.LevelMarker.START, offset=0),
+            ),
+        ),
+        (
+            AxisInterval(
+                start=AxisBound(level=LevelMarker.END, offset=-2),
+                end=AxisBound(level=LevelMarker.END, offset=10000),
+            ),
+            gtir.HorizontalInterval(
+                start=gtir.AxisBound(level=common.LevelMarker.END, offset=-2),
+                end=gtir.AxisEndpoint.END,
+            ),
+        ),
+    ),
+)
+def test_horizontal_specialization(defir_to_gtir, interval, expected):
+    defir_hif = HorizontalIf(intervals={"I": interval}, body=BlockStmt(stmts=[]))
+    gtir_hs = defir_to_gtir.visit_HorizontalIf(defir_hif)
+
+    if isinstance(expected.start, gtir.AxisEndpoint):
+        assert gtir_hs.intervals[0].start == expected.start
+    else:
+        assert gtir_hs.intervals[0].start.level == expected.start.level
+        assert gtir_hs.intervals[0].start.offset == expected.start.offset
+
+    if isinstance(expected.end, gtir.AxisEndpoint):
+        assert gtir_hs.intervals[0].end == expected.end
+    else:
+        assert gtir_hs.intervals[0].end.level == expected.end.level
+        assert gtir_hs.intervals[0].end.offset == expected.end.offset
 
 
 @pytest.mark.parametrize(

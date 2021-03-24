@@ -201,6 +201,10 @@ class HorizontalInterval(LocNode):
     start: Union[AxisBound, AxisEndpoint]
     end: Union[AxisBound, AxisEndpoint]
 
+    @classmethod
+    def full_interval(cls):
+        return cls(start=AxisEndpoint.START, end=AxisEndpoint.END)
+
 
 class Interval(LocNode):
     start: AxisBound

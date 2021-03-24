@@ -31,6 +31,7 @@ from gt4py.ir.nodes import (
     ComputationBlock,
     FieldDecl,
     FieldRef,
+    HorizontalIf,
     If,
     IterationOrder,
     LevelMarker,
@@ -248,6 +249,31 @@ class DefIRToGTIR(IRNodeVisitor):
                 if node.else_body
                 else None,
             )
+
+    @classmethod
+    def _translate_horizontal_axisbound(cls, axis_bound: AxisBound) -> gtir.AxisBound:
+        """Translate Axisbound in definition ir used for horizontal axes to gtir."""
+        if axis_bound.level == LevelMarker.START and axis_bound.offset < -1000:
+            return gtir.AxisEndpoint.START
+        elif axis_bound.level == LevelMarker.END and axis_bound.offset > 1000:
+            return gtir.AxisEndpoint.END
+        else:
+            return gtir.AxisBound(
+                level=cls.GT4PY_LEVELMARKER_TO_GTIR_LEVELMARKER[axis_bound.level],
+                offset=axis_bound.offset,
+            )
+
+    def visit_HorizontalIf(self, node: HorizontalIf):
+        intervals = []
+        for axis in ("I", "J"):
+            defir_interval = node.intervals.get(axis, None)
+            if defir_interval:
+                start_bound = self._translate_horizontal_axisbound(defir_interval.start)
+                end_bound = self._translate_horizontal_axisbound(defir_interval.end)
+                intervals.append(gtir.HorizontalInterval(start=start_bound, end=end_bound))
+            else:
+                intervals.append(gtir.HorizontalInterval.full_interval())
+        return gtir.HorizontalSpecialization(intervals=intervals, body=node.body.stmts)
 
     def visit_VarRef(self, node: VarRef, **kwargs):
         # TODO(havogt) seems wrong, but check the DefinitionIR for
