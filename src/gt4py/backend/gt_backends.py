@@ -15,6 +15,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import abc
+import copy
 import functools
 import numbers
 import os
@@ -436,7 +437,8 @@ class ComputationMergingWrapper:
 
 def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
     # Trivially lower StencilImplementation to GTStencil
-    gtstencil = LowerToGTStencil.apply(impl_node)
+
+    gtstencil = LowerToGTStencil.apply(copy.deepcopy(impl_node))
 
     # Merge computations as possible
     gt_analysis.passes.greedy_merging_with_wrapper(
@@ -932,18 +934,14 @@ from gt4py import storage as gt_storage
         )
 
     def generate_implementation(self) -> str:
-        # TODO (JD): Use gtstencil here instead of the definition IR. This will have
-        # the correct arg_fields.
-
-        definition_ir = self.builder.definition_ir
+        gtstencil = impl_to_gtstencil(self.builder.implementation_ir)
         sources = gt_utils.text.TextBlock(indent_size=self.TEMPLATE_INDENT_SIZE)
 
         api_field_args = []
         parameter_args = []
-        api_fields = set(field.name for field in definition_ir.api_fields)
-        for arg in definition_ir.api_signature:
+        for arg in self.builder.implementation_ir.api_signature:
             if arg.name not in self.args_data["unreferenced"]:
-                if arg.name in api_fields:
+                if arg.name in gtstencil.api_fields:
                     api_field_args.append(arg.name)
                     api_field_args.append("list(_origin_['{}'])".format(arg.name))
                 else:
@@ -951,7 +949,7 @@ from gt4py import storage as gt_storage
 
         allocations = []
         tmp_field_args = []
-        for name in self.fields_in_horizontal_if:
+        for name in gtstencil.arg_fields:
             upper_indices = self.builder.implementation_ir.fields_extents[name].upper_indices
             lower_indices = self.builder.implementation_ir.fields_extents[name].lower_indices
             dtype = self.builder.implementation_ir.fields[name].data_type.dtype
@@ -977,6 +975,7 @@ from gt4py import storage as gt_storage
         # only generate implementation if any multi_stages are present. e.g. if no statement in the
         # stencil has any effect on the API fields, this may not be the case since they could be
         # pruned.
+
         if self.builder.implementation_ir.has_effect:
             source = """
 {allocations}
@@ -988,7 +987,7 @@ pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
             )
             sources.extend(source.splitlines())
         else:
-            sources.extend("\n")
+            sources.append("")
 
         return sources.text
 
