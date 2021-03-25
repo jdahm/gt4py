@@ -18,19 +18,7 @@ import abc
 import functools
 import numbers
 import os
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Generator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import TYPE_CHECKING, Dict, Generator, List, Optional, Sequence, Set, Tuple, Type, Union
 
 import jinja2
 import numpy as np
@@ -42,6 +30,7 @@ from gt4py import gt_src_manager
 from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
 from gt4py.utils import text as gt_text
+from gt4py.utils.attrib import Any
 from gt4py.utils.attrib import Dict as DictOf
 from gt4py.utils.attrib import List as ListOf
 from gt4py.utils.attrib import attribkwclass as attribclass
@@ -177,6 +166,8 @@ class GTStencil(GTNode):
 
 
 class LowerHorizontalIf(gt_ir.IRNodeMapper):
+    """Replaces gt_ir.HorizontalIf with gt_ir.If, gt_ir.AxisOffset, gt_ir.AxisIndex."""
+
     @classmethod
     def apply(cls, impl_node: GTStencil) -> None:
         cls(impl_node.domain).visit(impl_node)
@@ -264,12 +255,12 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
     2. Fill arg_fields with fields used inside HorizontalIf nodes
 
     The IR will be invalid after this mostly naive lowering. To become valid,
-    it will need the remainder of the passes in :func:`iir_to_gtcpp`.
+    it will need the remainder of the passes in :func:`impl_to_gtstencil`.
     """
 
     @classmethod
     def apply(cls, impl_node: gt_ir.StencilImplementation) -> None:
-        cls(impl_node).visit(impl_node)
+        return cls(impl_node).visit(impl_node)
 
     def __init__(self, impl_node: gt_ir.StencilImplementation):
         self.impl_node = impl_node
@@ -279,35 +270,40 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
 
     @staticmethod
     def stages_in_multistage(multi_stage: gt_ir.MultiStage) -> Generator[gt_ir.Stage, None, None]:
-        for group in multi_stage.group:
+        for group in multi_stage.groups:
             yield from group.stages
 
-    def visit_MultiStage(self, node: gt_ir.MultiStage) -> Computation:
+    def visit_MultiStage(self, path: tuple, node_name: str, node: gt_ir.MultiStage) -> Computation:
+        api_signature_names = [arg.name for arg in self.impl_node.api_signature]
+
         arg_fields = set()
         for horizontal_if in gt_ir.filter_nodes_dfs(node, gt_ir.HorizontalIf):
             arg_fields |= {
-                ref.name for ref in gt_ir.filter_nodes_dfs(horizontal_if.main_body, gt_ir.FieldRef)
+                ref.name for ref in gt_ir.filter_nodes_dfs(horizontal_if.body, gt_ir.FieldRef)
             }
-        arg_fields = {name: self.impl_node.fields[name] for name in arg_fields}
+        arg_fields = {
+            name: self.impl_node.fields[name]
+            for name in arg_fields
+            if name not in api_signature_names
+        }
 
         parameters = {}
         temporaries = {}
-        api_signature_names = [arg.name for arg in self.impl_node.api_signature]
         for stage in self.stages_in_multistage(node):
-            for accessor in {
-                accessor
+            for symbol in {
+                accessor.symbol
                 for accessor in stage.accessors
                 if isinstance(accessor, gt_ir.ParameterAccessor)
             }:
-                parameters[accessor.symbol] = self.impl_node.parameters[accessor.symbol]
-            for accessor in {
-                accessor
+                parameters[symbol] = self.impl_node.parameters[symbol]
+            for symbol in {
+                accessor.symbol
                 for accessor in stage.accessors
                 if isinstance(accessor, gt_ir.FieldAccessor)
-                and accessor.name not in api_signature_names
-                and accessor.name not in arg_fields
+                and accessor.symbol not in api_signature_names
+                and accessor.symbol not in arg_fields
             }:
-                temporaries[accessor.symbol] = self.impl_node.fields[accessor.symbol]
+                temporaries[symbol] = self.impl_node.fields[symbol]
 
         return True, Computation(
             multistages=[node],
@@ -316,13 +312,17 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
             temporaries=temporaries,
         )
 
-    def visit_StencilImplementation(self, node: gt_ir.StencilImplementation) -> GTStencil:
+    def visit_StencilImplementation(
+        self, path: tuple, node_name: str, node: gt_ir.StencilImplementation
+    ) -> GTStencil:
         return True, GTStencil(
             name=node.name,
             domain=node.domain,
             computations=[self.visit(multi_stage) for multi_stage in node.multi_stages],
             api_fields={
-                node.fields[arg.name] for arg in node.api_signature if arg.name in node.fields
+                arg.name: node.fields[arg.name]
+                for arg in node.api_signature
+                if arg.name in node.fields
             },
             fields_extents=node.fields_extents,
             unreferenced=node.unreferenced,
@@ -344,35 +344,62 @@ class ComputationMergingWrapper:
     def can_merge_with(self, candidate: "ComputationMergingWrapper") -> bool:
         # Cannot merge if:
 
-        # Iteration order does not match
-        # (JD): I do not think this one is necessary, and in fact we want to let
-        # GridTools possibly merge the multistages in this case in general.
-
         # Any field in candidate.arg_fields is an inout accessor in any stage in self.
         # this means it was set in this computation, so a sync is needed before
         # the computation including the horizontal if.
         for field in candidate.arg_fields:
             for stage in self.stages:
-                if any(
-                    {
-                        accessor
-                        for accessor in stage.accessors
-                        if accessor.name == field
-                        and accessor.intent == gt_ir.AccessIntent.READ_WRITE
-                    }
+                if self.accessors_with_name_and_intent(stage, field, gt_ir.AccessIntent.READ_WRITE):
+                    return False
+
+        # Any arg_field or api_field that is an inout accessor in self is an
+        # in accessor before an inout inside stages of candidate.
+        for symbol in self.inout_api_or_arg_fields:
+            for stage in candidate.stages:
+                if self.accessors_with_name_and_intent(stage, symbol, gt_ir.AccessIntent.READ):
+                    break
+                if self.accessors_with_name_and_intent(
+                    stage, symbol, gt_ir.AccessIntent.READ_WRITE
                 ):
                     return False
+
+        # Iteration order does not match
+        # (JD): I do not think this one is necessary, and in fact we want to let
+        # GridTools possibly merge the multistages in this case in general.
 
         return True
 
     def merge_with(self, candidate: "ComputationMergingWrapper") -> None:
-        pass
+        self.computation.multistages.extend(candidate.multistages)
+        self.computation.parameters.update(candidate.parameters)
+        self.computation.arg_fields.update(candidate.arg_fields)
+        self.computation.temporaries.update(candidate.temporaries)
 
     @property
     def stages(self) -> Generator[gt_ir.Stage, None, None]:
-        for multi_stage in self.computation:
-            for group in multi_stage.groups:
+        for multistage in self.computation.multistages:
+            for group in multistage.groups:
                 yield from group.stages
+
+    @staticmethod
+    def accessors_with_name_and_intent(stage, symbol, intent):
+        return [
+            accessor
+            for accessor in stage.accessors
+            if accessor.symbol == symbol and accessor.intent == intent
+        ]
+
+    @property
+    def inout_api_or_arg_fields(self) -> Set[str]:
+        inout_fields = set()
+        for stage in self.stages:
+            for accessor in stage.accessors:
+                if (
+                    accessor.symbol in self.parent.api_fields
+                    or accessor.symbol in self.computation.arg_fields
+                ) and accessor.intent == gt_ir.AccessIntent.READ_WRITE:
+                    inout_fields.add(accessor.symbol)
+        return inout_fields
 
     @property
     def computation(self) -> Computation:
@@ -383,11 +410,15 @@ class ComputationMergingWrapper:
         return self.computation.arg_fields
 
     @property
+    def parent(self) -> GTStencil:
+        return self._parent
+
+    @property
     def wrapped(self) -> Computation:
         return self._computation
 
 
-def iir_to_gtcpp(impl_node: gt_ir.StencilImplementation) -> GTStencil:
+def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
     # Trivially lower StencilImplementation to GTStencil
     gtstencil = LowerToGTStencil.apply(impl_node)
 
@@ -396,7 +427,17 @@ def iir_to_gtcpp(impl_node: gt_ir.StencilImplementation) -> GTStencil:
         gtstencil.computations, ComputationMergingWrapper, parent=gtstencil
     )
 
-    # Fix arg_fields created by the splitting above
+    # Fill missing arg_fields
+    all_arg_fields = set().union(
+        *(computation.arg_fields.keys() for computation in gtstencil.computations)
+    )
+    for computation in gtstencil.computations:
+        to_move = {
+            temp: value for temp, value in computation.temporaries.items() if temp in all_arg_fields
+        }
+        computation.arg_fields.update(to_move)
+        for temp in to_move:
+            del computation.temporaries[temp]
 
     # Convert HorizontalIf -> If
     LowerHorizontalIf.apply(gtstencil)
@@ -516,8 +557,8 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         self.domain = impl_node.domain
         self.k_splitters: List[Tuple[str, int]] = []
 
-        gtcpp_ir = iir_to_gtcpp(self.builder.implementation_ir)
-        source = self.visit(gtcpp_ir)
+        gtstencil = impl_to_gtstencil(self.impl_node)
+        source = self.visit(gtstencil)
 
         return source
 
@@ -732,7 +773,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return interval_definition, body_sources.text
 
-    def visit_Stage(self, node: gt_ir.Stage) -> Dict[str, Any]:
+    def visit_Stage(self, node: gt_ir.Stage):
         # Initialize symbols for the generation of references in this stage
         self.stage_symbols = {}
         args = []
