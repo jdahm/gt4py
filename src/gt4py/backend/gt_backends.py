@@ -965,20 +965,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
 
 class GTPyModuleGenerator(gt_backend.PyExtModuleGenerator):
-    @property
-    def fields_in_horizontal_if(self) -> Set[str]:
-        names = []
-        for node in gt_ir.filter_nodes_dfs(self.builder.implementation_ir, gt_ir.If):
-            if len(list(gt_ir.filter_nodes_dfs(node.condition, gt_ir.AxisIndex))):
-                # Assume this is a HorizontalIf
-                names.extend(
-                    [ref.name for ref in gt_ir.filter_nodes_dfs(node.main_body, gt_ir.FieldRef)]
-                )
-
-        return set(names).difference(
-            {param.name for param in self.builder.implementation_ir.api_signature}
-        )
-
     def generate_imports(self) -> str:
         return (
             """
