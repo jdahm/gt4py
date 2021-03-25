@@ -16,16 +16,12 @@
 
  ---- Template variables ----
 
+    - api_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
-    - constants: { name:str : str }
-    - gt_backend: str
+    - tmp_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
     - halo_sizes: [int]
-    - k_axis: { "n_intervals": int, "offset_limit": int}
-    - max_ndim: int
-    - requires_positional: bool
-    - multi_stages: [{ "exec": str, "steps": [str], "fields": [str], "parameters": [str]}]
-    - parameters: [{ "name": str, "dtype": str }]
-    - stage_functors: {
+    - constants: { name:str : str }
+    stage_functors- stage_functors: {
         name:str : {
             "args": [
                 {
@@ -42,9 +38,13 @@
                 }
             ]
         }
-    }
+    },
+    - gt_backend: str
+    - parameters: [{ "name": str, "dtype": str }]
+    - k_axis: { "n_intervals": int, "offset_limit": int}
+    - module_name: str,
+    - computations: [{"multistages": {"exec": str, "steps": [str]}, "requires_positional": bool, "arg_fields": [str]}]
     - stencil_unique_name: str
-    - tmp_fields: [{ "name": str, "dtype": str }]
 #}
 
 {%- set axes_names = ["I", "J", "K"] -%}
