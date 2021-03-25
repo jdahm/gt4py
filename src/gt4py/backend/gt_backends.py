@@ -935,7 +935,14 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             for multistage in computation.multistages:
                 for group in multistage.groups:
                     for stage in group.stages:
+                        compute_extent = stage.compute_extent
+                        extents: List[int] = []
+                        for i in range(compute_extent.ndims - 1):
+                            extents.extend(
+                                (compute_extent.lower_indices[i], compute_extent.upper_indices[i])
+                            )
                         stage_functors[stage.name] = self.visit(stage)
+                        stage_functors[stage.name]["extent"] = compute_extent
 
         any_positional = any(computation["requires_positional"] for computation in computations)
 
