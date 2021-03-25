@@ -381,11 +381,11 @@ class ComputationMergingWrapper:
         return True
 
     def merge_with(self, candidate: "ComputationMergingWrapper") -> None:
-        self.computation.multistages.extend(candidate.multistages)
-        self.computation.api_fields.update(candidate.api_fields)
-        self.computation.arg_fields.update(candidate.arg_fields)
-        self.computation.parameters.update(candidate.parameters)
-        self.computation.temporaries.update(candidate.temporaries)
+        self.computation.multistages.extend(candidate.computation.multistages)
+        self.computation.api_fields.update(candidate.computation.api_fields)
+        self.computation.arg_fields.update(candidate.computation.arg_fields)
+        self.computation.parameters.update(candidate.computation.parameters)
+        self.computation.temporaries.update(candidate.computation.temporaries)
 
     @property
     def stages(self) -> Generator[gt_ir.Stage, None, None]:
