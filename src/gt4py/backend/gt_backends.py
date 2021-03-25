@@ -430,45 +430,71 @@ class ComputationMergingWrapper:
         return self._computation
 
 
-def update_arg_fields(gtstencil: GTStencil):
-    # Fill missing arg_fields
-    arg_fields = set()
-    promote_to_arg_fields = set()
-    field_to_last_write_loc = {}
-    for index, computation in enumerate(gtstencil.computations):
-        # Collect set of all arg_fields to propagate to all computations in next loop
-        arg_fields.update(computation.arg_fields)
+class UpdateArgFields:
+    @property
+    def stages_with_computation_index(self) -> Generator[gt_ir.Stage, None, None]:
+        for comp_index, computation in enumerate(self.computations):
+            yield from (
+                (comp_index, stage)
+                for multistage in computation.multistages
+                for group in multistage.groups
+                for stage in group.stages
+            )
+
+    @property
+    def computations(self) -> Generator[Computation, None, None]:
+        return self.gtstencil.computations
+
+    @property
+    def gtstencil(self) -> GTStencil:
+        return self._gtstencil
+
+    def __init__(self, gtstencil: GTStencil):
+        self._gtstencil = gtstencil
+
+    def __call__(self):
+        # Fill missing arg_fields
+        promote_to_arg_fields = set()
+        field_to_last_write_loc = {}
+
+        # Collect set of all arg_fields to propagate to all computations
+        for computation in self.computations:
+            promote_to_arg_fields.update(computation.arg_fields)
 
         # Promote temporaries that are READ before any WRITE in the same computation.
         # Also, READ in another computation than WRITE.
-        for multistage in computation.multistages:
-            for group in multistage.groups:
-                for stage in group.stages:
-                    for symbol in {
-                        accessor.symbol
-                        for accessor in stage.accessors
-                        if isinstance(accessor, gt_ir.FieldAccessor)
-                        and accessor.intent == gt_ir.AccessIntent.READ_WRITE
-                    }:
-                        field_to_last_write_loc[symbol] = index
-                    for symbol in {
-                        accessor.symbol
-                        for accessor in stage.accessors
-                        if isinstance(accessor, gt_ir.FieldAccessor)
-                        and accessor.intent == gt_ir.AccessIntent.READ_ONLY
-                        and field_to_last_write_loc.get(accessor.symbol, None) != index
-                        and accessor.symbol in computation.temporaries
-                    }:
-                        promote_to_arg_fields.add(symbol)
-    for computation in gtstencil.computations:
-        to_move = {
-            temp: value
-            for temp, value in computation.temporaries.items()
-            if temp in promote_to_arg_fields or temp in arg_fields
-        }
-        computation.arg_fields.update(to_move)
-        for temp in to_move:
-            del computation.temporaries[temp]
+        for comp_index, stage in self.stages_with_computation_index:
+            for symbol in {
+                accessor.symbol
+                for accessor in stage.accessors
+                if isinstance(accessor, gt_ir.FieldAccessor)
+                and accessor.intent == gt_ir.AccessIntent.READ_WRITE
+            }:
+                field_to_last_write_loc[symbol] = comp_index
+            for symbol in {
+                accessor.symbol
+                for accessor in stage.accessors
+                if isinstance(accessor, gt_ir.FieldAccessor)
+                and accessor.intent == gt_ir.AccessIntent.READ_ONLY
+                and field_to_last_write_loc.get(accessor.symbol, None) != comp_index
+                and accessor.symbol in computation.temporaries
+            }:
+                promote_to_arg_fields.add(symbol)
+
+        # In each computation, move requested fields from temporaries to arg_fields
+        for computation in self.computations:
+            to_move = {
+                temp: value
+                for temp, value in computation.temporaries.items()
+                if temp in promote_to_arg_fields
+            }
+            computation.arg_fields.update(to_move)
+            for temp in to_move:
+                del computation.temporaries[temp]
+
+    @classmethod
+    def apply(cls, gtstencil: GTStencil):
+        cls(gtstencil)()
 
 
 def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
@@ -480,23 +506,11 @@ def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
         gtstencil.computations, ComputationMergingWrapper, parent=gtstencil
     )
 
-    # Fill missing arg_fields
-    all_arg_fields = set()
-    for computation in gtstencil.computations:
-        all_arg_fields.update(computation.arg_fields)
-    for computation in gtstencil.computations:
-        to_move = {
-            temp: value for temp, value in computation.temporaries.items() if temp in all_arg_fields
-        }
-        computation.arg_fields.update(to_move)
-        for temp in to_move:
-            del computation.temporaries[temp]
-
     # Convert HorizontalIf -> If
     LowerHorizontalIf.apply(gtstencil)
 
-    # Fill arg_fields
-    update_arg_fields(gtstencil)
+    # Propagate arg_fields across computations and promote temporaries as needed
+    UpdateArgFields.apply(gtstencil)
 
     return gtstencil
 
