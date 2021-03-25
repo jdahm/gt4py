@@ -449,7 +449,6 @@ class ComputationMergingWrapper:
 
 def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
     # Trivially lower StencilImplementation to GTStencil
-
     gtstencil = LowerToGTStencil.apply(copy.deepcopy(impl_node))
 
     # Merge computations as possible
@@ -472,7 +471,38 @@ def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
     # Convert HorizontalIf -> If
     LowerHorizontalIf.apply(gtstencil)
 
-    # TODO (JD): Fix temporaries across computations...
+    # Fix temporaries across computations
+    promote_to_arg_fields = set()
+    field_to_last_write_loc = {}
+    for index, computation in enumerate(gtstencil.computations):
+        for multistage in computation.multistages:
+            for group in multistage.groups:
+                for stage in group.stages:
+                    for symbol in {
+                        accessor.symbol
+                        for accessor in stage.accessors
+                        if isinstance(accessor, gt_ir.FieldAccessor)
+                        and accessor.intent == gt_ir.AccessIntent.READ_WRITE
+                    }:
+                        field_to_last_write_loc[symbol] = index
+                    for symbol in {
+                        accessor.symbol
+                        for accessor in stage.accessors
+                        if isinstance(accessor, gt_ir.FieldAccessor)
+                        and accessor.intent == gt_ir.AccessIntent.READ_ONLY
+                        and field_to_last_write_loc.get(accessor.symbol, None) != index
+                        and accessor.symbol in computation.temporaries
+                    }:
+                        promote_to_arg_fields.add(symbol)
+    for computation in gtstencil.computations:
+        to_move = {
+            temp: value
+            for temp, value in computation.temporaries.items()
+            if temp in promote_to_arg_fields
+        }
+        computation.arg_fields.update(to_move)
+        for temp in to_move:
+            del computation.temporaries[temp]
 
     return gtstencil
 
