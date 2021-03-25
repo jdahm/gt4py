@@ -370,30 +370,13 @@ class ComputationMergingWrapper:
         return [cls(ij_block, parent) for ij_block in items]
 
     def can_merge_with(self, candidate: "ComputationMergingWrapper") -> bool:
-        # Cannot merge if:
-
-        # Any field in candidate.arg_fields is an inout accessor in any stage in self.
-        # this means it was set in this computation, so a sync is needed before
-        # the computation including the horizontal if.
+        # Cannot merge if any field in candidate.arg_fields is an inout accessor
+        # in any stage in self. This means it was set in this computation, so a
+        # sync is needed before the computation including the horizontal if.
         for field in candidate.arg_fields:
             for stage in self.stages:
                 if self.accessors_with_name_and_intent(stage, field, gt_ir.AccessIntent.READ_WRITE):
                     return False
-
-        # Any arg_field or api_field that is an inout accessor in self is an
-        # in accessor before an inout inside stages of candidate.
-        for symbol in self.inout_api_or_arg_fields:
-            for stage in candidate.stages:
-                if self.accessors_with_name_and_intent(stage, symbol, gt_ir.AccessIntent.READ):
-                    break
-                if self.accessors_with_name_and_intent(
-                    stage, symbol, gt_ir.AccessIntent.READ_WRITE
-                ):
-                    return False
-
-        # Iteration order does not match
-        # (JD): I do not think this one is necessary, and in fact we want to let
-        # GridTools possibly merge the multistages in this case in general.
 
         return True
 
@@ -447,6 +430,47 @@ class ComputationMergingWrapper:
         return self._computation
 
 
+def update_arg_fields(gtstencil: GTStencil):
+    # Fill missing arg_fields
+    arg_fields = set()
+    promote_to_arg_fields = set()
+    field_to_last_write_loc = {}
+    for index, computation in enumerate(gtstencil.computations):
+        # Collect set of all arg_fields to propagate to all computations in next loop
+        arg_fields.update(computation.arg_fields)
+
+        # Promote temporaries that are READ before any WRITE in the same computation.
+        # Also, READ in another computation than WRITE.
+        for multistage in computation.multistages:
+            for group in multistage.groups:
+                for stage in group.stages:
+                    for symbol in {
+                        accessor.symbol
+                        for accessor in stage.accessors
+                        if isinstance(accessor, gt_ir.FieldAccessor)
+                        and accessor.intent == gt_ir.AccessIntent.READ_WRITE
+                    }:
+                        field_to_last_write_loc[symbol] = index
+                    for symbol in {
+                        accessor.symbol
+                        for accessor in stage.accessors
+                        if isinstance(accessor, gt_ir.FieldAccessor)
+                        and accessor.intent == gt_ir.AccessIntent.READ_ONLY
+                        and field_to_last_write_loc.get(accessor.symbol, None) != index
+                        and accessor.symbol in computation.temporaries
+                    }:
+                        promote_to_arg_fields.add(symbol)
+    for computation in gtstencil.computations:
+        to_move = {
+            temp: value
+            for temp, value in computation.temporaries.items()
+            if temp in promote_to_arg_fields or temp in arg_fields
+        }
+        computation.arg_fields.update(to_move)
+        for temp in to_move:
+            del computation.temporaries[temp]
+
+
 def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
     # Trivially lower StencilImplementation to GTStencil
     gtstencil = LowerToGTStencil.apply(copy.deepcopy(impl_node))
@@ -471,38 +495,8 @@ def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
     # Convert HorizontalIf -> If
     LowerHorizontalIf.apply(gtstencil)
 
-    # Fix temporaries across computations
-    promote_to_arg_fields = set()
-    field_to_last_write_loc = {}
-    for index, computation in enumerate(gtstencil.computations):
-        for multistage in computation.multistages:
-            for group in multistage.groups:
-                for stage in group.stages:
-                    for symbol in {
-                        accessor.symbol
-                        for accessor in stage.accessors
-                        if isinstance(accessor, gt_ir.FieldAccessor)
-                        and accessor.intent == gt_ir.AccessIntent.READ_WRITE
-                    }:
-                        field_to_last_write_loc[symbol] = index
-                    for symbol in {
-                        accessor.symbol
-                        for accessor in stage.accessors
-                        if isinstance(accessor, gt_ir.FieldAccessor)
-                        and accessor.intent == gt_ir.AccessIntent.READ_ONLY
-                        and field_to_last_write_loc.get(accessor.symbol, None) != index
-                        and accessor.symbol in computation.temporaries
-                    }:
-                        promote_to_arg_fields.add(symbol)
-    for computation in gtstencil.computations:
-        to_move = {
-            temp: value
-            for temp, value in computation.temporaries.items()
-            if temp in promote_to_arg_fields
-        }
-        computation.arg_fields.update(to_move)
-        for temp in to_move:
-            del computation.temporaries[temp]
+    # Fill arg_fields
+    update_arg_fields(gtstencil)
 
     return gtstencil
 

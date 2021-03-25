@@ -16,6 +16,7 @@
 
  ---- Template variables ----
 
+    - api_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
     - gt_backend: str
     - module_name: str
@@ -78,6 +79,10 @@ BufferInfo make_buffer_info(py::object& b) {
 
 void run_computation(const std::array<gt::uint_t, MAX_DIM>& domain,
 {%- set comma = joiner(", ") -%}
+{%- for field in api_fields -%}
+                     {{- comma() }}
+                     py::object {{ field.name }}, const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
+{%- endfor -%}
 {%- for field in arg_fields -%}
                      {{- comma() }}
                      py::object {{ field.name }}, const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
@@ -93,12 +98,20 @@ void run_computation(const std::array<gt::uint_t, MAX_DIM>& domain,
         exec_info_dict["run_cpp_start_time"] = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count())/1e9;
     }
 
+
+{%- for field in api_fields %}
+    auto bi_{{ field.name }} = make_buffer_info({{ field.name }});
+{%- endfor %}
 {%- for field in arg_fields %}
     auto bi_{{ field.name }} = make_buffer_info({{ field.name }});
 {%- endfor %}
 
     {{ stencil_unique_name }}::run(domain,
 {%- set comma = joiner(", ") -%}
+{%- for field in api_fields -%}
+        {{- comma() }}
+        bi_{{ field.name }}, {{ field.name }}_origin
+{%- endfor -%}
 {%- for field in arg_fields -%}
         {{- comma() }}
         bi_{{ field.name }}, {{ field.name }}_origin
@@ -122,6 +135,10 @@ PYBIND11_MODULE({{ module_name }}, m) {
     m.def("run_computation", &run_computation, "Runs the given computation",
           py::arg("domain"),
 {%- set comma = joiner(", ") -%}
+{%- for field in api_fields -%}
+          {{- comma() }}
+          py::arg("{{ field.name }}") {{- comma() }} py::arg("{{ field.name }}_origin") {{- zero_origin }}
+{%- endfor -%}
 {%- for field in arg_fields -%}
           {{- comma() }}
           py::arg("{{ field.name }}") {{- comma() }} py::arg("{{ field.name }}_origin") {{- zero_origin }}

@@ -16,6 +16,7 @@
 
  ---- Template variables ----
 
+    - api_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
     - arg_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
     - parameters: [{ "name": str, "dtype": str }]
     - stencil_unique_name: str
@@ -51,6 +52,10 @@ namespace {{ stencil_unique_name }} {
 
 void run(const std::array<gt::uint_t, 3>& domain,
 {%- set comma = joiner(", ") %}
+{%- for field in api_fields -%}
+         {{- comma() }}
+         const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
+{%- endfor %}
 {%- for field in arg_fields -%}
          {{- comma() }}
          const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
