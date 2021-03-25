@@ -18,17 +18,34 @@ import abc
 import functools
 import numbers
 import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 import jinja2
 import numpy as np
 
+from gt4py import analysis as gt_analysis
 from gt4py import backend as gt_backend
 from gt4py import definitions as gt_definitions
 from gt4py import gt_src_manager
 from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
 from gt4py.utils import text as gt_text
+from gt4py.utils.attrib import Dict as DictOf
+from gt4py.utils.attrib import List as ListOf
+from gt4py.utils.attrib import attribkwclass as attribclass
+from gt4py.utils.attrib import attribute
 
 from . import pyext_builder
 
@@ -124,9 +141,44 @@ def cuda_is_compatible_type(field: Any) -> bool:
     return isinstance(field, (GPUStorage, ExplicitlySyncedGPUStorage))
 
 
-class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
+class GTNode(gt_ir.IIRNode):
+    pass
+
+
+@attribclass
+class Computation(GTNode):
+    multistages = attribute(of=ListOf[gt_ir.MultiStage])
+    parameters = attribute(of=DictOf[str, gt_ir.VarDecl])
+    arg_fields = attribute(of=DictOf[str, gt_ir.FieldDecl])
+    temporaries = attribute(of=DictOf[str, gt_ir.FieldDecl])
+
+
+@attribclass
+class GTStencil(GTNode):
+    name = attribute(of=str)
+    domain = attribute(of=gt_ir.Domain)
+    computations = attribute(of=ListOf[Computation])
+    api_fields = attribute(of=DictOf[str, gt_ir.FieldDecl])
+    fields_extents = attribute(of=DictOf[str, gt_ir.Extent])
+    unreferenced = attribute(of=ListOf[str], factory=list)
+    externals = attribute(of=DictOf[str, Any], optional=True)
+
+    @property
+    def has_effect(self):
+        """
+        Determine whether the stencil modifies any of its arguments.
+
+        Note that the only guarantee of this function is that the stencil has no effect if it returns ``false``. It
+        might however return true in cases where the optimization passes were not able to deduce this.
+        """
+        return self.computations and not all(
+            api_field in self.unreferenced for api_field in self.api_fields
+        )
+
+
+class LowerHorizontalIf(gt_ir.IRNodeMapper):
     @classmethod
-    def apply(cls, impl_node: gt_ir.StencilImplementation) -> None:
+    def apply(cls, impl_node: GTStencil) -> None:
         cls(impl_node.domain).visit(impl_node)
 
     def __init__(self, domain: gt_ir.Domain):
@@ -203,6 +255,153 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
             )
         else:
             return True, node.body
+
+
+class LowerToGTStencil(gt_ir.IRNodeMapper):
+    """Lower StencilImplementation to a GTStencil.
+
+    1. Place each MultiStage into its own Computation
+    2. Fill arg_fields with fields used inside HorizontalIf nodes
+
+    The IR will be invalid after this mostly naive lowering. To become valid,
+    it will need the remainder of the passes in :func:`iir_to_gtcpp`.
+    """
+
+    @classmethod
+    def apply(cls, impl_node: gt_ir.StencilImplementation) -> None:
+        cls(impl_node).visit(impl_node)
+
+    def __init__(self, impl_node: gt_ir.StencilImplementation):
+        self.impl_node = impl_node
+
+    def __call__(self, impl_node: gt_ir.StencilImplementation):
+        return self.visit(impl_node)
+
+    @staticmethod
+    def stages_in_multistage(multi_stage: gt_ir.MultiStage) -> Generator[gt_ir.Stage, None, None]:
+        for group in multi_stage.group:
+            yield from group.stages
+
+    def visit_MultiStage(self, node: gt_ir.MultiStage) -> Computation:
+        arg_fields = set()
+        for horizontal_if in gt_ir.filter_nodes_dfs(node, gt_ir.HorizontalIf):
+            arg_fields |= {
+                ref.name for ref in gt_ir.filter_nodes_dfs(horizontal_if.main_body, gt_ir.FieldRef)
+            }
+        arg_fields = {name: self.impl_node.fields[name] for name in arg_fields}
+
+        parameters = {}
+        temporaries = {}
+        api_signature_names = [arg.name for arg in self.impl_node.api_signature]
+        for stage in self.stages_in_multistage(node):
+            for accessor in {
+                accessor
+                for accessor in stage.accessors
+                if isinstance(accessor, gt_ir.ParameterAccessor)
+            }:
+                parameters[accessor.symbol] = self.impl_node.parameters[accessor.symbol]
+            for accessor in {
+                accessor
+                for accessor in stage.accessors
+                if isinstance(accessor, gt_ir.FieldAccessor)
+                and accessor.name not in api_signature_names
+                and accessor.name not in arg_fields
+            }:
+                temporaries[accessor.symbol] = self.impl_node.fields[accessor.symbol]
+
+        return True, Computation(
+            multistages=[node],
+            parameters=parameters,
+            arg_fields=arg_fields,
+            temporaries=temporaries,
+        )
+
+    def visit_StencilImplementation(self, node: gt_ir.StencilImplementation) -> GTStencil:
+        return True, GTStencil(
+            name=node.name,
+            domain=node.domain,
+            computations=[self.visit(multi_stage) for multi_stage in node.multi_stages],
+            api_fields={
+                node.fields[arg.name] for arg in node.api_signature if arg.name in node.fields
+            },
+            fields_extents=node.fields_extents,
+            unreferenced=node.unreferenced,
+            externals=node.externals,
+        )
+
+
+class ComputationMergingWrapper:
+    def __init__(self, computation: Computation, parent: GTStencil):
+        self._computation = computation
+        self._parent = parent
+
+    @classmethod
+    def wrap_items(
+        cls, items: Sequence[Computation], *, parent: GTStencil
+    ) -> List["ComputationMergingWrapper"]:
+        return [cls(ij_block, parent) for ij_block in items]
+
+    def can_merge_with(self, candidate: "ComputationMergingWrapper") -> bool:
+        # Cannot merge if:
+
+        # Iteration order does not match
+        # (JD): I do not think this one is necessary, and in fact we want to let
+        # GridTools possibly merge the multistages in this case in general.
+
+        # Any field in candidate.arg_fields is an inout accessor in any stage in self.
+        # this means it was set in this computation, so a sync is needed before
+        # the computation including the horizontal if.
+        for field in candidate.arg_fields:
+            for stage in self.stages:
+                if any(
+                    {
+                        accessor
+                        for accessor in stage.accessors
+                        if accessor.name == field
+                        and accessor.intent == gt_ir.AccessIntent.READ_WRITE
+                    }
+                ):
+                    return False
+
+        return True
+
+    def merge_with(self, candidate: "ComputationMergingWrapper") -> None:
+        pass
+
+    @property
+    def stages(self) -> Generator[gt_ir.Stage, None, None]:
+        for multi_stage in self.computation:
+            for group in multi_stage.groups:
+                yield from group.stages
+
+    @property
+    def computation(self) -> Computation:
+        return self._computation
+
+    @property
+    def arg_fields(self) -> Dict[str, gt_ir.FieldDecl]:
+        return self.computation.arg_fields
+
+    @property
+    def wrapped(self) -> Computation:
+        return self._computation
+
+
+def iir_to_gtcpp(impl_node: gt_ir.StencilImplementation) -> GTStencil:
+    # Trivially lower StencilImplementation to GTStencil
+    gtstencil = LowerToGTStencil.apply(impl_node)
+
+    # Merge computations as possible
+    gt_analysis.passes.greedy_merging_with_wrapper(
+        gtstencil.computations, ComputationMergingWrapper, parent=gtstencil
+    )
+
+    # Fix arg_fields created by the splitting above
+
+    # Convert HorizontalIf -> If
+    LowerHorizontalIf.apply(gtstencil)
+
+    return gtstencil
 
 
 class _MaxKOffsetExtractor(gt_ir.IRNodeVisitor):
@@ -317,7 +516,8 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         self.domain = impl_node.domain
         self.k_splitters: List[Tuple[str, int]] = []
 
-        source = self.visit(impl_node)
+        gtcpp_ir = iir_to_gtcpp(self.builder.implementation_ir)
+        source = self.visit(gtcpp_ir)
 
         return source
 
@@ -704,6 +904,9 @@ from gt4py import storage as gt_storage
         )
 
     def generate_implementation(self) -> str:
+        # TODO (JD): Use gtstencil here instead of the definition IR. This will have
+        # the correct arg_fields.
+
         definition_ir = self.builder.definition_ir
         sources = gt_utils.text.TextBlock(indent_size=self.TEMPLATE_INDENT_SIZE)
 
@@ -781,9 +984,6 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         self.check_options(self.builder.options)
 
         implementation_ir = self.builder.implementation_ir
-
-        # Lower HorizontalIf to If
-        LowerHorizontalIfPass.apply(self.builder.implementation_ir)
 
         # Generate the Python binary extension (checking if GridTools sources are installed)
         if not gt_src_manager.has_gt_sources() and not gt_src_manager.install_gt_sources():
