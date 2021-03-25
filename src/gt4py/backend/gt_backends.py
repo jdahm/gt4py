@@ -502,9 +502,10 @@ def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
     gtstencil = LowerToGTStencil.apply(copy.deepcopy(impl_node))
 
     # Merge computations as possible
-    gt_analysis.passes.greedy_merging_with_wrapper(
+    computations = gt_analysis.passes.greedy_merging_with_wrapper(
         gtstencil.computations, ComputationMergingWrapper, parent=gtstencil
     )
+    gtstencil.computations = computations
 
     # Convert HorizontalIf -> If
     LowerHorizontalIf.apply(gtstencil)
@@ -867,7 +868,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
     def _make_field_list(self, field_dict, storage_ids) -> List[Dict[str, Any]]:
         output = []
-        for field in sorted(list(field_dict.keys())):
+        for field in sorted(field_dict.keys()):
             field_decl = field_dict[field]
             field_attributes = self._make_field_attributes(field_decl)
             if field_decl.layout_id not in storage_ids:
@@ -890,9 +891,9 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         return {
             "multistages": multistages,
             "requires_positional": requires_positional,
-            "api_fields": node.api_fields,
-            "arg_fields": node.arg_fields,
-            "parameters": node.parameters,
+            "api_fields": sorted(node.api_fields),
+            "arg_fields": sorted(node.arg_fields),
+            "parameters": sorted(node.parameters),
         }
 
     def visit_GTStencil(self, node: GTStencil) -> Dict[str, Dict[str, str]]:
