@@ -21,7 +21,7 @@
     - tmp_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
     - halo_sizes: [int]
     - constants: { name:str : str }
-    stage_functors- stage_functors: {
+    - stage_functors: {
         name:str : {
             "args": [
                 {
@@ -43,7 +43,19 @@
     - parameters: [{ "name": str, "dtype": str }]
     - k_axis: { "n_intervals": int, "offset_limit": int}
     - module_name: str,
-    - computations: [{"multistages": {"exec": str, "steps": [str]}, "requires_positional": bool, "arg_fields": [str]}]
+    - computations: [
+        {
+            "multistages": {
+                "exec": str,
+                "steps": [str]
+            },
+            "requires_positional": bool,
+            "api_fields": [str],
+            "arg_fields": [str],
+            "parameters": [str]
+        }
+    ]
+    - any_positional: bool
     - stencil_unique_name: str
 #}
 
@@ -158,23 +170,33 @@ static constexpr gt::uint_t halo_size_k = {{ halo_sizes[2] }};
 
 // Placeholder definitions
 {% set arg_counter = 0 -%}
+// API fields
+{%- for field in api_fields %}
+using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ field.layout_id }}, {{ field.selector | join(", ") | lower }}>::store_t>;
+{%- endfor %}
+{% set arg_counter = arg_counter + api_fields|length %}
+{% if arg_fields -%}
+// Explicitly allocated fields due to computation splitting
 {%- for field in arg_fields %}
 using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ field.layout_id }}, {{ field.selector | join(", ") | lower }}>::store_t>;
 {%- endfor %}
 {% set arg_counter = arg_counter + arg_fields|length %}
+{%- endif %}
+// Parameters
 {% for param in parameters %}
 using p_{{ param.name }} = gt::arg<{{ arg_counter + loop.index0 }}, gt::global_parameter<{{ param.dtype }}>>;
 {%- endfor %}
 {% set arg_counter = arg_counter + parameters|length %}
-{%- if requires_positional -%}
+{%- if any_positional -%}
+// Positional indices
 {% for axis_name in axes_names %}
 using p_domain_size_{{ axis_name }} = gt::arg<{{ arg_counter + loop.index0 }}, gt::global_parameter<gt::uint_t>>;
 {%- endfor %}
 {% set arg_counter = arg_counter + axes_names|length %}
 {%- endif -%}
 {% if tmp_fields -%}
+// Temporaries (all are are 3D storages)
 {%- for field in tmp_fields %}
-// All temporaries are 3D storages. For now...
 using p_{{ field.name }} = gt::tmp_arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, 0, 1, 1, 1>::store_t>;
 {%- endfor %}
 {% set arg_counter = arg_counter + tmp_fields|length %}
@@ -207,15 +229,7 @@ struct {{ name }}_func {
                                                gt::level<{{ region.interval_end|join(", ") }}, level_offset_limit>>)
     {
 {%- filter indent(width=8) %}
-{%- if region.entry_conditional|length > 0 %}
-if ({{ region.entry_conditional }}) {
-{%- filter indent(width=4) %}
 {{ region.body }}
-{%- endfilter %}
-}
-{%- else %}
-{{ region.body }}
-{%- endif %}
 {%- endfilter %}
     }
     {%- endfor %}
@@ -240,6 +254,10 @@ auto make_grid(const std::array<gt::uint_t, MAX_DIM>& compute_domain_shape) {
 // Run actual computation
 void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 {%- set comma = joiner(", ") %}
+{%- for field in api_fields -%}
+         {{- comma() }}
+         const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
+{%- endfor %}
 {%- for field in arg_fields -%}
          {{- comma() }}
          const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
@@ -267,6 +285,9 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
         assert(halo_k == halo_size_k);
 #}
     // Initialize data stores from input buffers
+{%- for field in api_fields %}
+    auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ field.layout_id }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
+{%- endfor %}
 {%- for field in arg_fields %}
     auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ field.layout_id }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
 {%- endfor %}
@@ -278,25 +299,26 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
     auto ps_domain_size_{{ axis_name }} = gt::make_global_parameter(domain[{{ loop.index0 }}]);
 {%- endfor -%}
 
-{% for multi_stage in multi_stages %}
-{%- if multi_stage.requires_positional %}
+{% for computation in computations %}
+{%- if computation.requires_positional %}
     auto gt_computation_{{ loop.index0 }} = gt::make_positional_computation<backend_t>(
 {%- else %}
     auto gt_computation_{{ loop.index0 }} = gt::make_computation<backend_t>(
 {%- endif %}
         make_grid(domain),
-{%- for param in multi_stage.parameters %}
+{%- for param in computation.parameters %}
         p_{{ param }}() = ps_{{ param }},
 {% endfor -%}
-{%- if multi_stage.requires_positional -%}
+{%- if computation.requires_positional -%}
 {%- for axis_name in axes_names %}
         p_domain_size_{{ axis_name }}() = ps_domain_size_{{ axis_name }},
 {%- endfor -%}
 {%- endif -%}
 
-        gt::make_multistage(gt::execute::{{ multi_stage.exec }}(),
+    {%- for multistage in computation["multistages"] %}
+        gt::make_multistage(gt::execute::{{ multistage.exec }}(),
     {%- set step_comma = joiner(",") %}
-    {%- for step in multi_stage.steps %}
+    {%- for step in multistage.steps %}
         {{- step_comma() }}
         {%- if step|length > 1 %}
             gt::make_independent(
@@ -318,12 +340,16 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
         {%- endif %}
     {%- endfor %}
         )
+    {%- endfor %}
     );
 
 {% endfor %}
-{% for multi_stage in multi_stages %}
+{% for computation in computations %}
     gt_computation_{{ loop.index0 }}.run({%- set comma = joiner(", ") %}
-{%- for field in multi_stage.fields -%}
+{%- for field in computation.api_fields -%}
+                     {{ comma() }}p_{{ field }}()=ds_{{ field }}
+{%- endfor %}
+{%- for field in computation.arg_fields -%}
                      {{ comma() }}p_{{ field }}()=ds_{{ field }}
 {%- endfor %});
 {% endfor %}

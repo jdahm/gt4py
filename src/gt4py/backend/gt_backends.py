@@ -151,6 +151,7 @@ class GTNode(gt_ir.IIRNode):
 @attribclass
 class Computation(GTNode):
     multistages = attribute(of=ListOf[gt_ir.MultiStage])
+    api_fields = attribute(of=SetOf[str])
     parameters = attribute(of=SetOf[str])
     arg_fields = attribute(of=SetOf[str])
     temporaries = attribute(of=DictOf[str, gt_ir.FieldDecl])
@@ -299,9 +300,18 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
             }
         arg_fields = {name for name in arg_fields if name not in api_signature_names}
 
+        api_fields = set()
         parameters = set()
         temporaries = dict()
         for stage in self.stages_in_multistage(node):
+            api_fields.update(
+                {
+                    accessor.symbol
+                    for accessor in stage.accessors
+                    if isinstance(accessor, gt_ir.FieldAccessor)
+                    and accessor.symbol in api_signature_names
+                }
+            )
             parameters.update(
                 {
                     accessor.symbol
@@ -320,8 +330,9 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
 
         return True, Computation(
             multistages=[node],
-            parameters=parameters,
+            api_fields=api_fields,
             arg_fields=arg_fields,
+            parameters=parameters,
             temporaries=temporaries,
         )
 
@@ -330,7 +341,7 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
     ) -> GTStencil:
         computations = [self.visit(multi_stage) for multi_stage in node.multi_stages]
 
-        api_fields_names = {arg.name for arg in node.api_signature if arg.name in node.fields}
+        api_fields_names = set().union(*(computation.api_fields for computation in computations))
         arg_fields_names = set().union(*(computation.arg_fields for computation in computations))
         parameters_names = set().union(*(computation.parameters for computation in computations))
 
@@ -339,8 +350,8 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
             domain=node.domain,
             computations=computations,
             api_fields={name: node.fields[name] for name in api_fields_names},
-            arg_fields={name: self.impl_node.fields[name] for name in arg_fields_names},
-            parameters={name: self.impl_node.parameters[name] for name in parameters_names},
+            arg_fields={name: node.fields[name] for name in arg_fields_names},
+            parameters={name: node.parameters[name] for name in parameters_names},
             fields_extents=node.fields_extents,
             unreferenced=node.unreferenced,
             externals=node.externals,
@@ -388,8 +399,9 @@ class ComputationMergingWrapper:
 
     def merge_with(self, candidate: "ComputationMergingWrapper") -> None:
         self.computation.multistages.extend(candidate.multistages)
-        self.computation.parameters.update(candidate.parameters)
+        self.computation.api_fields.update(candidate.api_fields)
         self.computation.arg_fields.update(candidate.arg_fields)
+        self.computation.parameters.update(candidate.parameters)
         self.computation.temporaries.update(candidate.temporaries)
 
     @property
@@ -836,12 +848,13 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
     def visit_Computation(self, node: Computation) -> Dict[str, Any]:
         multistages = [self.visit(multistage) for multistage in node.multistages]
         requires_positional = len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex))) > 0
-        arg_fields = node.arg_fields
 
         return {
             "multistages": multistages,
             "requires_positional": requires_positional,
-            "arg_fields": arg_fields,
+            "api_fields": node.api_fields,
+            "arg_fields": node.arg_fields,
+            "parameters": node.parameters,
         }
 
     def visit_GTStencil(self, node: GTStencil) -> Dict[str, Dict[str, str]]:
@@ -885,6 +898,8 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                     for stage in group.stages:
                         stage_functors[stage.name] = self.visit(stage)
 
+        any_positional = any(computation["requires_positional"] for computation in computations)
+
         template_args = dict(
             api_fields=api_fields,
             arg_fields=arg_fields,
@@ -897,6 +912,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             k_axis=k_axis,
             module_name=self.module_name,
             computations=computations,
+            any_positional=any_positional,
             stencil_unique_name=self.class_name,
         )
 
@@ -939,8 +955,10 @@ from gt4py import storage as gt_storage
 
         api_field_args = []
         parameter_args = []
+        # Assumption used below that parameteters always follow fields in the API signature,
+        # because GridTools asserts this.
         for arg in self.builder.implementation_ir.api_signature:
-            if arg.name not in self.args_data["unreferenced"]:
+            if arg.name not in self.args_data["unreferenced"] and arg.name in gtstencil.api_fields:
                 if arg.name in gtstencil.api_fields:
                     api_field_args.append(arg.name)
                     api_field_args.append("list(_origin_['{}'])".format(arg.name))
