@@ -16,9 +16,8 @@
 
  ---- Template variables ----
 
-    - api_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
-    - arg_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
-    - tmp_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
+    - allocated_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
+    - tmp_fields: [{ "name": str, "dtype": str }]
     - halo_sizes: [int]
     - constants: { name:str : str }
     - stage_functors: {
@@ -171,18 +170,11 @@ static constexpr gt::uint_t halo_size_k = {{ halo_sizes[2] }};
 
 // Placeholder definitions
 {% set arg_counter = 0 -%}
-// API fields
-{%- for field in api_fields %}
+// Allocated fields (API and extra args)
+{%- for field in allocated_fields %}
 using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ field.layout_id }}, {{ field.selector | join(", ") | lower }}>::store_t>;
 {%- endfor %}
-{% set arg_counter = arg_counter + api_fields|length %}
-{% if arg_fields -%}
-// Explicitly allocated fields due to computation splitting
-{%- for field in arg_fields %}
-using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ field.layout_id }}, {{ field.selector | join(", ") | lower }}>::store_t>;
-{%- endfor %}
-{% set arg_counter = arg_counter + arg_fields|length %}
-{%- endif %}
+{% set arg_counter = arg_counter + allocated_fields|length %}
 // Parameters
 {% for param in parameters %}
 using p_{{ param.name }} = gt::arg<{{ arg_counter + loop.index0 }}, gt::global_parameter<{{ param.dtype }}>>;
@@ -255,11 +247,7 @@ auto make_grid(const std::array<gt::uint_t, MAX_DIM>& compute_domain_shape) {
 // Run actual computation
 void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 {%- set comma = joiner(", ") %}
-{%- for field in api_fields -%}
-         {{- comma() }}
-         const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
-{%- endfor %}
-{%- for field in arg_fields -%}
+{%- for field in allocated_fields -%}
          {{- comma() }}
          const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
 {%- endfor %}
@@ -286,10 +274,7 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
         assert(halo_k == halo_size_k);
 #}
     // Initialize data stores from input buffers
-{%- for field in api_fields %}
-    auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ field.layout_id }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
-{%- endfor %}
-{%- for field in arg_fields %}
+{%- for field in allocated_fields %}
     auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ field.layout_id }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
 {%- endfor %}
 {%- for param in parameters %}
@@ -333,7 +318,7 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
         {%- for stage in step %}
             {%- filter indent(width=extra_indent) %}
             {{- stage_comma() }}
-            gt::make_stage_with_extent<{{ stage }}_func, gt::extent<{{ stage_functors[stage]["extent"] }}>>(
+            gt::make_stage_with_extent<{{ stage }}_func, gt::extent<{{ stage_functors[stage].extent }}>>(
                 p_{{ stage_functors[stage].args|map(attribute="name")|join("(), p_")}}()
             )
             {%- endfilter %}
