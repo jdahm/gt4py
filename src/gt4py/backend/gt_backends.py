@@ -910,7 +910,9 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         arg_fields = []
 
         for name in [
-            arg.name for arg in gtstencil.api_signature if arg.name not in gtstencil.unreferenced
+            arg.name
+            for arg in gtstencil.api_signature
+            if arg.name in gtstencil.fields and arg.name not in gtstencil.unreferenced
         ]:
             field_decl = gtstencil.fields[name]
             field_attributes = self._make_field_attributes(field_decl)
@@ -1017,6 +1019,7 @@ from gt4py import storage as gt_storage
             arg.name for arg in gtstencil.api_signature if arg.name in gtstencil.fields
         }
         # These are sorted so that they are in a stable order
+        # Note that this must match the ordering in _collect_field_arguments
         arg_field_names = sorted([name for name in gtstencil.fields if name not in api_field_names])
 
         api_field_args = []
