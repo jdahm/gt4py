@@ -863,7 +863,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 }
             )
 
-        extents = ", ".join(gt_utils.flatten(node.compute_extent))
+        extents = gt_utils.flatten(node.compute_extent)
         functor_content = {
             "args": args,
             "regions": regions,

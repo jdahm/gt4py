@@ -318,7 +318,7 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
         {%- for stage in step %}
             {%- filter indent(width=extra_indent) %}
             {{- stage_comma() }}
-            gt::make_stage_with_extent<{{ stage }}_func, gt::extent<{{ stage_functors[stage].extent }}>>(
+            gt::make_stage_with_extent<{{ stage }}_func, gt::extent<{{ stage_functors[stage].extent | join(", ") }}>>(
                 p_{{ stage_functors[stage].args|map(attribute="name")|join("(), p_")}}()
             )
             {%- endfilter %}
