@@ -341,12 +341,17 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
     ) -> GTStencil:
         computations = [self.visit(multi_stage) for multi_stage in node.multi_stages]
 
+        tmp_fields = set().union(*(computation.tmp_fields for computation in computations))
+        api_and_arg_fields = {
+            name: decl for name, decl in node.fields.items() if name not in tmp_fields
+        }
+
         return True, GTStencil(
             name=node.name,
             domain=node.domain,
             computations=computations,
             api_signature=node.api_signature,
-            fields=node.fields,
+            fields=api_and_arg_fields,
             parameters=node.parameters,
             fields_extents=node.fields_extents,
             unreferenced=node.unreferenced,
@@ -465,15 +470,18 @@ class UpdateArgFields:
                 and accessor.intent == gt_ir.AccessIntent.READ_WRITE
             }:
                 field_to_last_write_loc[symbol] = comp_index
-            for symbol in {
-                accessor.symbol
-                for accessor in stage.accessors
-                if isinstance(accessor, gt_ir.FieldAccessor)
-                and accessor.intent == gt_ir.AccessIntent.READ_ONLY
-                and field_to_last_write_loc.get(accessor.symbol, None) != comp_index
-                and accessor.symbol in self.gtstencil.computations[comp_index].tmp_fields
-            }:
-                promote_to_arg_fields.add(symbol)
+
+            computation_tmp_fields = self.gtstencil.computations[comp_index].tmp_fields
+            promote_to_arg_fields.union(
+                {
+                    accessor.symbol
+                    for accessor in stage.accessors
+                    if isinstance(accessor, gt_ir.FieldAccessor)
+                    and accessor.intent == gt_ir.AccessIntent.READ_ONLY
+                    and field_to_last_write_loc.get(accessor.symbol, None) != comp_index
+                    and accessor.symbol in computation_tmp_fields
+                }
+            )
 
         # In each computation, move requested fields from temporaries to arg_fields
         for computation in self.gtstencil.computations:
@@ -936,7 +944,9 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         for computation in node.computations:
             for name in sorted(computation.tmp_fields.keys()):
                 field_decl = computation.tmp_fields[name]
-                tmp_fields.append({"name": name, "dtype": field_decl.dtype})
+                tmp_fields.append(
+                    {"name": name, "dtype": self._make_cpp_type(field_decl.data_type)}
+                )
 
         parameters = [
             {"name": parameter.name, "dtype": self._make_cpp_type(parameter.data_type)}
