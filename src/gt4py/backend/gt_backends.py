@@ -26,6 +26,7 @@ from typing import (
     Generator,
     List,
     Optional,
+    OrderedDict,
     Sequence,
     Set,
     Tuple,
@@ -948,13 +949,19 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         allocated_fields = self._collect_field_arguments(node)
 
         # All temporaries become gt::tmp_arg at the top level
-        tmp_fields = []
+        tmp_fields = OrderedDict()
         for computation in node.computations:
             for name in sorted(computation.tmp_fields.keys()):
                 field_decl = computation.tmp_fields[name]
-                tmp_fields.append(
-                    {"name": name, "dtype": self._make_cpp_type(field_decl.data_type)}
-                )
+                dtype = self._make_cpp_type(field_decl.data_type)
+                if name not in tmp_fields:
+                    tmp_fields[name] = {"name": name, "dtype": dtype}
+                else:
+                    existing_dtype = tmp_fields[name]["dtype"]
+                    if dtype != existing_dtype:
+                        raise TypeError(
+                            f"Temporary {name} has conflicting dtypes: {existing_dtype} and {dtype}"
+                        )
 
         parameters = [
             {"name": parameter.name, "dtype": self._make_cpp_type(parameter.data_type)}
@@ -985,7 +992,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         template_args = dict(
             allocated_fields=allocated_fields,
-            tmp_fields=tmp_fields,
+            tmp_fields=tuple(tmp_fields.values()),
             halo_sizes=halo_sizes,
             constants=constants,
             stage_functors=stage_functors,
