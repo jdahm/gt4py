@@ -497,6 +497,11 @@ class UpdateArgFields:
             for tmp in to_move:
                 del computation.tmp_fields[tmp]
 
+        # Update LayoutId for all arg_fields
+        for name, field_decl in self.gtstencil.fields.items():
+            if field_decl.layout_id == "_default_":
+                field_decl.layout_id = name
+
     @classmethod
     def apply(cls, gtstencil: GTStencil):
         cls(gtstencil)()
