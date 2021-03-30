@@ -375,7 +375,7 @@ class ComputationMergingWrapper:
         # Cannot merge if any field in candidate.arg_fields is an inout accessor
         # in any stage in self. This means it was set in this computation, so a
         # sync is needed before the computation including the horizontal if.
-        for field in candidate.arg_fields:
+        for field in candidate.arg_fields | self.arg_fields:
             for stage in self.stages:
                 if self.accessors_with_name_and_intent(stage, field, gt_ir.AccessIntent.WRITE):
                     return False
