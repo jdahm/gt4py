@@ -497,11 +497,6 @@ class UpdateArgFields:
             for tmp in to_move:
                 del computation.tmp_fields[tmp]
 
-        # Update LayoutId for all arg_fields
-        for name, field_decl in self.gtstencil.fields.items():
-            if field_decl.layout_id == "_default_":
-                field_decl.layout_id = name
-
     @classmethod
     def apply(cls, gtstencil: GTStencil):
         cls(gtstencil)()
@@ -916,7 +911,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         }
 
     def _collect_field_arguments(self, gtstencil: GTStencil) -> List[Dict[str, str]]:
-        storage_ids = []
         api_fields = []
         arg_fields = []
 
@@ -927,9 +921,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         ]:
             field_decl = gtstencil.fields[name]
             field_attributes = self._make_field_attributes(field_decl)
-            if field_decl.layout_id not in storage_ids:
-                storage_ids.append(field_decl.layout_id)
-            field_attributes["layout_id"] = storage_ids.index(field_decl.layout_id)
             api_fields.append(field_attributes)
 
         api_names = {arg.name for arg in gtstencil.api_signature}
@@ -939,9 +930,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         for name in arg_names:
             field_decl = gtstencil.fields[name]
             field_attributes = self._make_field_attributes(field_decl)
-            if field_decl.layout_id not in storage_ids:
-                storage_ids.append(field_decl.layout_id)
-            field_attributes["layout_id"] = storage_ids.index(field_decl.layout_id)
             arg_fields.append(field_attributes)
 
         return api_fields + arg_fields

@@ -16,7 +16,7 @@
 
  ---- Template variables ----
 
-    - allocated_fields: [{ "name": str, "dtype": str, "layout_id": int, "selector": [bool], "naxes": int }]
+    - allocated_fields: [{ "name": str, "dtype": str, "selector": [bool], "naxes": int }]
     - tmp_fields: [{ "name": str, "dtype": str }]
     - halo_sizes: [int]
     - constants: { name:str : str }
@@ -172,7 +172,7 @@ static constexpr gt::uint_t halo_size_k = {{ halo_sizes[2] }};
 {% set arg_counter = 0 -%}
 // Allocated fields (API and extra args)
 {%- for field in allocated_fields %}
-using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ field.layout_id }}, {{ field.selector | join(", ") | lower }}>::store_t>;
+using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ arg_counter + loop.index0 }}, {{ field.selector | join(", ") | lower }}>::store_t>;
 {%- endfor %}
 {% set arg_counter = arg_counter + allocated_fields|length %}
 // Parameters
@@ -274,8 +274,9 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
         assert(halo_k == halo_size_k);
 #}
     // Initialize data stores from input buffers
+{% set arg_counter = 0 -%}
 {%- for field in allocated_fields %}
-    auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ field.layout_id }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
+    auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ arg_counter + loop.index0 }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
 {%- endfor %}
 {%- for param in parameters %}
     auto ps_{{ param.name }} = gt::make_global_parameter<{{ param.dtype }}>({{ param.name }});
