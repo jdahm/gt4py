@@ -464,25 +464,25 @@ class UpdateArgFields:
         # Promote temporaries that are READ before any WRITE in the same computation.
         # Also, READ in another computation than WRITE.
         for comp_index, stage in self.stages_with_computation_index:
+            computation_tmp_fields = self.gtstencil.computations[comp_index].tmp_fields
             for symbol in {
                 accessor.symbol
                 for accessor in stage.accessors
                 if isinstance(accessor, gt_ir.FieldAccessor)
-                and accessor.intent == gt_ir.AccessIntent.READ_WRITE
+                and bool(accessor.intent & gt_ir.AccessIntent.READ)
+                and accessor.symbol in computation_tmp_fields
+            }:
+                last_write_comp = field_to_last_write_loc.get(symbol, None)
+                if last_write_comp is not None and last_write_comp != comp_index:
+                    promote_to_arg_fields.add(symbol)
+
+            for symbol in {
+                accessor.symbol
+                for accessor in stage.accessors
+                if isinstance(accessor, gt_ir.FieldAccessor)
+                and bool(accessor.intent & gt_ir.AccessIntent.WRITE)
             }:
                 field_to_last_write_loc[symbol] = comp_index
-
-            computation_tmp_fields = self.gtstencil.computations[comp_index].tmp_fields
-            promote_to_arg_fields.union(
-                {
-                    accessor.symbol
-                    for accessor in stage.accessors
-                    if isinstance(accessor, gt_ir.FieldAccessor)
-                    and accessor.intent == gt_ir.AccessIntent.READ_ONLY
-                    and field_to_last_write_loc.get(accessor.symbol, None) != comp_index
-                    and accessor.symbol in computation_tmp_fields
-                }
-            )
 
         # In each computation, move requested fields from temporaries to arg_fields
         for computation in self.gtstencil.computations:
