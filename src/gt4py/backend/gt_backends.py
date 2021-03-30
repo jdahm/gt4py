@@ -377,7 +377,7 @@ class ComputationMergingWrapper:
         # sync is needed before the computation including the horizontal if.
         for field in candidate.arg_fields:
             for stage in self.stages:
-                if self.accessors_with_name_and_intent(stage, field, gt_ir.AccessIntent.READ_WRITE):
+                if self.accessors_with_name_and_intent(stage, field, gt_ir.AccessIntent.WRITE):
                     return False
 
         return True
@@ -400,7 +400,7 @@ class ComputationMergingWrapper:
         return [
             accessor
             for accessor in stage.accessors
-            if accessor.symbol == symbol and accessor.intent == intent
+            if accessor.symbol == symbol and bool(accessor.intent & intent)
         ]
 
     @property
