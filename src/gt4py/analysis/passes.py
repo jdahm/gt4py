@@ -997,10 +997,20 @@ class RemoveUnreachedStatementsPass(TransformPass):
                         stmt_infos.append(stmt_info)
                 int_block.stmts = stmt_infos
 
+    @staticmethod
+    def has_effect(dom_block: DomainBlockInfo) -> bool:
+        for ij_block in dom_block.ij_blocks:
+            for int_block in ij_block.interval_blocks:
+                if len(int_block.stmts) > 0:
+                    return True
+        return False
+
     @classmethod
     def apply(cls, transform_data: TransformData) -> None:
         for dom_block in transform_data.blocks:
             cls.filter_domain_block(dom_block)
+
+        transform_data.blocks = [block for block in transform_data.blocks if cls.has_effect(block)]
 
 
 class ComputeExtentsPass(TransformPass):
