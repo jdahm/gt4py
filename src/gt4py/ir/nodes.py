@@ -637,6 +637,7 @@ class FieldDecl(Decl):
     is_api = attribute(of=bool)
     layout_id = attribute(of=str, default="_default_")
     loc = attribute(of=Location, optional=True)
+    requires_sync = attribute(of=bool, default=False)
 
 
 @attribclass

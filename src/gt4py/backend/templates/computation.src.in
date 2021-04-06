@@ -287,11 +287,11 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 {%- endfor -%}
 
 {% for computation in computations %}
-{%- if computation.requires_positional %}
+{% if computation.requires_positional %}
     auto gt_computation_{{ loop.index0 }} = gt::make_positional_computation<backend_t>(
-{%- else %}
+{% else %}
     auto gt_computation_{{ loop.index0 }} = gt::make_computation<backend_t>(
-{%- endif %}
+{% endif %}
         make_grid(domain),
 {%- for param in computation.parameters %}
         p_{{ param }}() = ps_{{ param }},
@@ -331,9 +331,9 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
         )
     {%- endfor %}
     );
+{%- endfor %}
 
-{% endfor %}
-{% for computation in computations %}
+{%- for computation in computations %}
     gt_computation_{{ loop.index0 }}.run({%- set comma = joiner(", ") %}
 {%- for field in computation.api_fields -%}
                      {{ comma() }}p_{{ field }}()=ds_{{ field }}
@@ -341,7 +341,7 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 {%- for field in computation.arg_fields -%}
                      {{ comma() }}p_{{ field }}()=ds_{{ field }}
 {%- endfor %});
-{% endfor %}
+{%- endfor %}
 }
 
 }  // namespace {{ stencil_unique_name }}

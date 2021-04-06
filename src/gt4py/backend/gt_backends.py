@@ -277,11 +277,12 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
     """
 
     @classmethod
-    def apply(cls, impl_node: gt_ir.StencilImplementation) -> None:
-        return cls(impl_node).visit(impl_node)
+    def apply(cls, impl_node: gt_ir.StencilImplementation, allocated_fields: Set[str]) -> None:
+        return cls(impl_node, allocated_fields).visit(impl_node)
 
-    def __init__(self, impl_node: gt_ir.StencilImplementation):
+    def __init__(self, impl_node: gt_ir.StencilImplementation, allocated_fields: Set[str]):
         self.impl_node = impl_node
+        self.allocated_fields = allocated_fields
 
     def __call__(self, impl_node: gt_ir.StencilImplementation):
         return self.visit(impl_node)
@@ -294,14 +295,8 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
     def visit_MultiStage(self, path: tuple, node_name: str, node: gt_ir.MultiStage) -> Computation:
         api_signature_names = [arg.name for arg in self.impl_node.api_signature]
 
-        arg_fields = set()
-        for horizontal_if in gt_ir.filter_nodes_dfs(node, gt_ir.HorizontalIf):
-            arg_fields |= {
-                ref.name for ref in gt_ir.filter_nodes_dfs(horizontal_if.body, gt_ir.FieldRef)
-            }
-        arg_fields = {name for name in arg_fields if name not in api_signature_names}
-
         api_fields = set()
+        arg_fields = set()
         parameters = set()
         tmp_fields = dict()
         for stage in self.stages_in_multistage(node):
@@ -320,12 +315,21 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
                     if isinstance(accessor, gt_ir.ParameterAccessor)
                 }
             )
+            arg_fields.update(
+                {
+                    accessor.symbol
+                    for accessor in stage.accessors
+                    if isinstance(accessor, gt_ir.FieldAccessor)
+                    and accessor.symbol in self.allocated_fields
+                    and accessor.symbol not in api_signature_names
+                }
+            )
             tmp_names = {
                 accessor.symbol
                 for accessor in stage.accessors
                 if isinstance(accessor, gt_ir.FieldAccessor)
                 and accessor.symbol not in api_signature_names
-                and accessor.symbol not in arg_fields
+                and accessor.symbol not in self.allocated_fields
             }
             tmp_fields.update({name: self.impl_node.fields[name] for name in tmp_names})
 
@@ -361,21 +365,20 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
 
 
 class ComputationMergingWrapper:
-    def __init__(self, computation: Computation, parent: GTStencil):
+    def __init__(self, computation: Computation):
         self._computation = computation
-        self._parent = parent
 
     @classmethod
     def wrap_items(
-        cls, items: Sequence[Computation], *, parent: GTStencil
+        cls,
+        items: Sequence[Computation],
     ) -> List["ComputationMergingWrapper"]:
-        return [cls(ij_block, parent) for ij_block in items]
+        return [cls(block) for block in items]
 
     def can_merge_with(self, candidate: "ComputationMergingWrapper") -> bool:
         # Cannot merge if any field in candidate.arg_fields is an inout accessor
-        # in any stage in self. This means it was set in this computation, so a
-        # sync is needed before the computation including the horizontal if.
-        for field in candidate.arg_fields | self.arg_fields:
+        # in any stage in self.
+        for field in self.arg_fields | candidate.arg_fields:
             for stage in self.stages:
                 if self.accessors_with_name_and_intent(stage, field, gt_ir.AccessIntent.WRITE):
                     return False
@@ -420,12 +423,8 @@ class ComputationMergingWrapper:
         return self._computation
 
     @property
-    def arg_fields(self) -> Dict[str, gt_ir.FieldDecl]:
+    def arg_fields(self) -> Set[str]:
         return self.computation.arg_fields
-
-    @property
-    def parent(self) -> GTStencil:
-        return self._parent
 
     @property
     def wrapped(self) -> Computation:
@@ -503,12 +502,18 @@ class UpdateArgFields:
 
 
 def impl_to_gtstencil(impl_node: gt_ir.StencilImplementation) -> GTStencil:
+    allocated_fields = {
+        name
+        for name, decl in impl_node.fields.items()
+        if isinstance(decl, gt_ir.FieldDecl) and decl.requires_sync
+    }
+
     # Trivially lower StencilImplementation to GTStencil
-    gtstencil = LowerToGTStencil.apply(copy.deepcopy(impl_node))
+    gtstencil = LowerToGTStencil.apply(copy.deepcopy(impl_node), allocated_fields)
 
     # Merge computations as possible
     gtstencil.computations = gt_analysis.passes.greedy_merging_with_wrapper(
-        gtstencil.computations, ComputationMergingWrapper, parent=gtstencil
+        gtstencil.computations, ComputationMergingWrapper
     )
 
     # Convert HorizontalIf -> If
