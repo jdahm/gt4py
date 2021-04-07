@@ -308,13 +308,6 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
                     and accessor.symbol in api_signature_names
                 }
             )
-            parameters.update(
-                {
-                    accessor.symbol
-                    for accessor in stage.accessors
-                    if isinstance(accessor, gt_ir.ParameterAccessor)
-                }
-            )
             arg_fields.update(
                 {
                     accessor.symbol
@@ -322,6 +315,13 @@ class LowerToGTStencil(gt_ir.IRNodeMapper):
                     if isinstance(accessor, gt_ir.FieldAccessor)
                     and accessor.symbol in self.allocated_fields
                     and accessor.symbol not in api_signature_names
+                }
+            )
+            parameters.update(
+                {
+                    accessor.symbol
+                    for accessor in stage.accessors
+                    if isinstance(accessor, gt_ir.ParameterAccessor)
                 }
             )
             tmp_names = {
@@ -376,14 +376,18 @@ class ComputationMergingWrapper:
         return [cls(block) for block in items]
 
     def can_merge_with(self, candidate: "ComputationMergingWrapper") -> bool:
-        # Cannot merge if any field in candidate.arg_fields is an inout accessor
-        # in any stage in self.
-        for field in self.arg_fields | candidate.arg_fields:
-            for stage in self.stages:
-                if self.accessors_with_name_and_intent(stage, field, gt_ir.AccessIntent.WRITE):
-                    return False
+        candidate_allocated_inputs = {
+            field
+            for field in candidate.field_accessors_with_intent(gt_ir.AccessIntent.READ)
+            if field in candidate.arg_fields
+        }
 
-        return True
+        self_allocated_outputs = {
+            field
+            for field in self.field_accessors_with_intent(gt_ir.AccessIntent.WRITE)
+            if field in self.arg_fields
+        }
+        return not candidate_allocated_inputs.intersection(self_allocated_outputs)
 
     def merge_with(self, candidate: "ComputationMergingWrapper") -> None:
         self.computation.multistages.extend(candidate.computation.multistages)
@@ -398,25 +402,15 @@ class ComputationMergingWrapper:
             for group in multistage.groups:
                 yield from group.stages
 
-    @staticmethod
-    def accessors_with_name_and_intent(stage, symbol, intent):
-        return [
-            accessor
-            for accessor in stage.accessors
-            if accessor.symbol == symbol and bool(accessor.intent & intent)
-        ]
-
-    @property
-    def inout_api_or_arg_fields(self) -> Set[str]:
-        inout_fields = set()
+    def field_accessors_with_intent(self, intent):
+        fields = set()
         for stage in self.stages:
-            for accessor in stage.accessors:
-                if (
-                    accessor.symbol in self.parent.api_fields
-                    or accessor.symbol in self.computation.arg_fields
-                ) and accessor.intent == gt_ir.AccessIntent.READ_WRITE:
-                    inout_fields.add(accessor.symbol)
-        return inout_fields
+            fields |= {
+                accessor.symbol
+                for accessor in stage.accessors
+                if isinstance(accessor, gt_ir.FieldAccessor) and bool(accessor.intent & intent)
+            }
+        return fields
 
     @property
     def computation(self) -> Computation:
