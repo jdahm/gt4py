@@ -537,8 +537,12 @@ class ComputationMergingWrapper:
         # an output in self.
 
         candidate_allocated_inputs = {
-            field for field in candidate.computation.inputs if field in candidate.allocated_fields
+            field
+            for field in candidate.computation.inputs
+            if field in candidate.allocated_fields
+            and not candidate.computation.inputs[field].is_zero
         }
+        # Maybe only with offset?
         self_allocated_outputs = {
             field for field in self.computation.outputs if field in self.allocated_fields
         }
@@ -1020,9 +1024,7 @@ class MergeBlocksPass(TransformPass):
 
     @classmethod
     def apply(cls, transform_data: TransformData) -> None:
-        # Unsure if this is needed
-        # allocated_fields = {decl.name for decl in transform_data.definition_ir.api_fields}
-        allocated_fields = set()
+        allocated_fields = {decl.name for decl in transform_data.definition_ir.api_fields}
         for horizontal_if in gt_ir.filter_nodes_dfs(
             transform_data.definition_ir, gt_ir.HorizontalIf
         ):

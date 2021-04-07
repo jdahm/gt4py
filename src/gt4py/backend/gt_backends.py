@@ -378,14 +378,16 @@ class ComputationMergingWrapper:
     def can_merge_with(self, candidate: "ComputationMergingWrapper") -> bool:
         candidate_allocated_inputs = {
             field
-            for field in candidate.field_accessors_with_intent(gt_ir.AccessIntent.READ)
-            if field in candidate.arg_fields
+            for field in candidate.field_accessors_with_intent(
+                gt_ir.AccessIntent.READ, has_nonzero_parallel_extent=True
+            )
+            if field in candidate.arg_fields | candidate.api_fields
         }
 
         self_allocated_outputs = {
             field
             for field in self.field_accessors_with_intent(gt_ir.AccessIntent.WRITE)
-            if field in self.arg_fields
+            if field in self.arg_fields | self.api_fields
         }
         return not candidate_allocated_inputs.intersection(self_allocated_outputs)
 
@@ -402,13 +404,15 @@ class ComputationMergingWrapper:
             for group in multistage.groups:
                 yield from group.stages
 
-    def field_accessors_with_intent(self, intent):
+    def field_accessors_with_intent(self, intent, has_nonzero_parallel_extent=False):
         fields = set()
         for stage in self.stages:
             fields |= {
                 accessor.symbol
                 for accessor in stage.accessors
-                if isinstance(accessor, gt_ir.FieldAccessor) and bool(accessor.intent & intent)
+                if isinstance(accessor, gt_ir.FieldAccessor)
+                and bool(accessor.intent & intent)
+                and (not has_nonzero_parallel_extent or not accessor.extent.is_zero)
             }
         return fields
 
@@ -419,6 +423,10 @@ class ComputationMergingWrapper:
     @property
     def arg_fields(self) -> Set[str]:
         return self.computation.arg_fields
+
+    @property
+    def api_fields(self) -> Set[str]:
+        return self.computation.api_fields
 
     @property
     def wrapped(self) -> Computation:
