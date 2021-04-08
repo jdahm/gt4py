@@ -1005,16 +1005,18 @@ class MergeBlocksPass(TransformPass):
                     yield from int_block.stmts
 
     @classmethod
-    def detect_allocated_fields(cls, comp_blocks: List[ComputationBlockInfo]) -> Set[str]:
+    def detect_allocated_fields(
+        cls, transform_data: TransformData, comp_blocks: List[ComputationBlockInfo]
+    ) -> Set[str]:
         allocated_fields = set()
-        last_write = {field: -1 for field in allocated_fields}
+        last_write = {name: None for name in transform_data.symbols}
 
         # Detect read before write in any computation block
         for index, comp_block in enumerate(comp_blocks):
             for statement_info in cls.statements_in_computation(comp_block):
                 # The order of the two for loops below matters!
                 for field in statement_info.inputs:
-                    allocated_last_write = last_write.get(field, None)
+                    allocated_last_write = last_write[field]
                     if allocated_last_write is not None and allocated_last_write != index:
                         allocated_fields.add(field)
                 for field in statement_info.outputs:
@@ -1034,7 +1036,7 @@ class MergeBlocksPass(TransformPass):
 
         while True:
             merged_blocks = cls.merge_blocks(transform_data, allocated_fields)
-            new_allocated_fields = cls.detect_allocated_fields(merged_blocks)
+            new_allocated_fields = cls.detect_allocated_fields(transform_data, merged_blocks)
             if new_allocated_fields - allocated_fields:
                 allocated_fields |= new_allocated_fields
             else:
