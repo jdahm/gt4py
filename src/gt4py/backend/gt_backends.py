@@ -937,15 +937,20 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         for name in arg_names:
             field_decl = gtstencil.fields[name]
             field_attributes = self._make_field_attributes(field_decl)
-            arg_fields.append(field_attributes)
+            upper_indices = self.impl_node.fields_extents[name].upper_indices
+            lower_indices = self.impl_node.fields_extents[name].lower_indices
+            shape_adds = [upper - lower for upper, lower in zip(upper_indices, lower_indices)]
+            shape = [f"domain[{i}] + {shape_adds[i]}" for i in range(len(shape_adds))]
+            halo = [max(0, -x) for x in lower_indices]
+            arg_fields.append({"shape": shape, "halo": halo, **field_attributes})
 
-        return api_fields + arg_fields
+        return api_fields, arg_fields
 
     def visit_GTStencil(self, node: GTStencil) -> Dict[str, Dict[str, str]]:
         computations = [self.visit(computation) for computation in node.computations]
 
         # allocated_fields are both api and arg fields
-        allocated_fields = self._collect_field_arguments(node)
+        api_fields, arg_fields = self._collect_field_arguments(node)
 
         # All temporaries become gt::tmp_arg at the top level
         tmp_fields = OrderedDict()
@@ -990,7 +995,8 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             stage_functors.update(computation["stage_functors"])
 
         template_args = dict(
-            allocated_fields=allocated_fields,
+            api_fields=api_fields,
+            arg_fields=arg_fields,
             tmp_fields=tuple(tmp_fields.values()),
             halo_sizes=halo_sizes,
             constants=constants,
@@ -1030,9 +1036,6 @@ from gt4py import storage as gt_storage
         api_field_names = {
             arg.name for arg in gtstencil.api_signature if arg.name in gtstencil.fields
         }
-        # These are sorted so that they are in a stable order
-        # Note that this must match the ordering in _collect_field_arguments
-        arg_field_names = sorted([name for name in gtstencil.fields if name not in api_field_names])
 
         api_field_args = []
         parameter_args = []
@@ -1046,30 +1049,8 @@ from gt4py import storage as gt_storage
                 else:
                     parameter_args.append(arg.name)
 
-        allocations = []
-        tmp_field_args = []
-        for name in arg_field_names:
-            upper_indices = self.builder.implementation_ir.fields_extents[name].upper_indices
-            lower_indices = self.builder.implementation_ir.fields_extents[name].lower_indices
-            dtype = gtstencil.fields[name].data_type.dtype
-            origin_values = [max(0, -x) for x in lower_indices]
-            shape_adds = [upper - lower for upper, lower in zip(upper_indices, lower_indices)]
-            shape = (
-                "["
-                + ", ".join([f"_domain_[{i}] + {shape_adds[i]}" for i in range(len(shape_adds))])
-                + "]"
-            )
-            origin_str = "[" + ", ".join([str(x) for x in origin_values]) + "]"
-            allocations.append(
-                f'storage_{name} = gt_storage.empty("{self.builder.backend.name}", default_origin={origin_str}, shape={shape}, dtype=np.{dtype})'
-            )
-            tmp_field_args.append(f"storage_{name}")
-            tmp_field_args.append(origin_str)
-
         # Field args must precede parameter args
         args = api_field_args
-        args.extend(tmp_field_args)
-        args.extend(parameter_args)
 
         # only generate implementation if any multi_stages are present. e.g. if no statement in the
         # stencil has any effect on the API fields, this may not be the case since they could be
@@ -1077,11 +1058,9 @@ from gt4py import storage as gt_storage
 
         if self.builder.implementation_ir.has_effect:
             source = """
-{allocations}
 # Load or generate a GTComputation object for the current domain size
 pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
 """.format(
-                allocations="\n".join(allocations),
                 run_args=", ".join(args),
             )
             sources.extend(source.splitlines())

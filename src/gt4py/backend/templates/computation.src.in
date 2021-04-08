@@ -16,7 +16,8 @@
 
  ---- Template variables ----
 
-    - allocated_fields: [{ "name": str, "dtype": str, "selector": [bool], "naxes": int }]
+    - api_fields: [{ "name": str, "dtype": str, "selector": [bool], "naxes": int }]
+    - arg_fields: [{ "name": str, "dtype": str, "selector": [bool], "naxes": int }]
     - tmp_fields: [{ "name": str, "dtype": str }]
     - halo_sizes: [int]
     - constants: { name:str : str }
@@ -171,10 +172,16 @@ static constexpr gt::uint_t halo_size_k = {{ halo_sizes[2] }};
 // Placeholder definitions
 {% set arg_counter = 0 -%}
 // Allocated fields (API and extra args)
-{%- for field in allocated_fields %}
+{%- for field in api_fields %}
 using p_{{ field.name }} = gt::arg<{{ arg_counter + loop.index0 }}, typename storage_traits<{{ field.dtype }}, {{ arg_counter + loop.index0 }}, {{ field.selector | join(", ") | lower }}>::store_t>;
 {%- endfor %}
-{% set arg_counter = arg_counter + allocated_fields|length %}
+{% set arg_counter = arg_counter + api_fields|length %}
+{%- for field in arg_fields %}
+using storage_info_t_{{ field.name }} = gt::storage_traits<backend_t>::storage_info_t<{{ arg_counter + loop.index0 }}, 3 /* dims */, gt::halo<{{ field.halo | join(", ")}}>>;
+using data_store_t_{{ field.name }} = gt::storage_traits<backend_t>::data_store_t<{{ field.dtype }}, storage_info_t_{{ field.name }}>;
+using p_{{ field.name}} = gt::arg<{{ arg_counter + loop.index0 }}, data_store_t_{{ field.name }}>;
+{%- endfor %}
+{% set arg_counter = arg_counter + arg_fields|length %}
 // Parameters
 {% for param in parameters %}
 using p_{{ param.name }} = gt::arg<{{ arg_counter + loop.index0 }}, gt::global_parameter<{{ param.dtype }}>>;
@@ -247,7 +254,7 @@ auto make_grid(const std::array<gt::uint_t, MAX_DIM>& compute_domain_shape) {
 // Run actual computation
 void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 {%- set comma = joiner(", ") %}
-{%- for field in allocated_fields -%}
+{%- for field in api_fields -%}
          {{- comma() }}
          const BufferInfo& bi_{{ field.name }} {{- comma() -}} const std::array<gt::uint_t, {{ field.naxes }}>& {{ field.name }}_origin
 {%- endfor %}
@@ -275,8 +282,12 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 #}
     // Initialize data stores from input buffers
 {% set arg_counter = 0 -%}
-{%- for field in allocated_fields %}
+{%- for field in api_fields %}
     auto ds_{{ field.name }} = make_data_store<{{ field.dtype }}, {{ arg_counter + loop.index0 }}, {{ field.naxes }}>(bi_{{ field.name }}, domain, {{ field.name }}_origin, gt::selector<{{ field.selector | join(", ") | lower }}>{});
+{%- endfor %}
+{%- for field in arg_fields %}
+    auto storage_info_{{ field.name }} = storage_info_t_{{ field.name }}({{ field.shape | join(", ") }});
+    auto ds_{{ field.name }} = data_store_t_{{ field.name }}(storage_info_{{ field.name }}, 0., "{{ field.name }}");
 {%- endfor %}
 {%- for param in parameters %}
     auto ps_{{ param.name }} = gt::make_global_parameter<{{ param.dtype }}>({{ param.name }});
@@ -289,9 +300,9 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 {% for computation in computations %}
 {% if computation.requires_positional %}
     auto gt_computation_{{ loop.index0 }} = gt::make_positional_computation<backend_t>(
-{% else %}
+{%- else %}
     auto gt_computation_{{ loop.index0 }} = gt::make_computation<backend_t>(
-{% endif %}
+{%- endif %}
         make_grid(domain),
 {%- for param in computation.parameters %}
         p_{{ param }}() = ps_{{ param }},
@@ -332,8 +343,7 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
     {%- endfor %}
     );
 {%- endfor %}
-
-{%- for computation in computations %}
+{% for computation in computations %}
     gt_computation_{{ loop.index0 }}.run({%- set comma = joiner(", ") %}
 {%- for field in computation.api_fields -%}
                      {{ comma() }}p_{{ field }}()=ds_{{ field }}
