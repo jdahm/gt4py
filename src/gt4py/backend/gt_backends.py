@@ -1052,12 +1052,11 @@ from gt4py import storage as gt_storage
                     parameter_args.append(arg.name)
 
         # Field args must precede parameter args
-        args = api_field_args
+        args = api_field_args + parameter_args
 
         # only generate implementation if any multi_stages are present. e.g. if no statement in the
         # stencil has any effect on the API fields, this may not be the case since they could be
         # pruned.
-
         if self.builder.implementation_ir.has_effect:
             source = """
 # Load or generate a GTComputation object for the current domain size

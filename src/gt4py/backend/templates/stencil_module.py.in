@@ -19,9 +19,8 @@
     - stencil_unique_name: str
     - module_name: str
     - backend: str
-    - arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
-    - tmp_arg_fields: [{ "name": str, "dtype": str, "layout_id": int }]
-    - parameters: [{ "name": str, "dtype": str }]
+    - field_names: [str]
+    - param_names: [str]
 
 imports, module_members, class_name, class_members, stencil_signature, implementation
 gt_backend, gt_source, gt_domain_info, gt_field_info, gt_parameter_info, gt_constants, gt_default_domain,
