@@ -850,13 +850,11 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 arg["extent"] = gt_utils.flatten(accessor.extent)
             args.append(arg)
 
-        if len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex))) > 0:
-            args.extend(
-                [
-                    {"name": f"domain_size_{name}", "access_type": "in", "extent": None}
-                    for name in self.domain.axes_names
-                ]
-            )
+        for name in sorted(
+            list({node.axis for node in gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex)})
+        ):
+            print(f"Appending domain_size_{name}")
+            args.append({"name": f"domain_size_{name}", "access_type": "in", "extent": None})
 
         # Create regions and computations
         regions = []
@@ -893,7 +891,10 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
     def visit_Computation(self, node: Computation) -> Dict[str, Any]:
         multistages = [self.visit(multistage) for multistage in node.multistages]
-        requires_positional = len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex))) > 0
+
+        positional_axes = sorted(
+            list({node.axis for node in gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex)})
+        )
 
         stage_functors = {}
         for multistage in multistages:
@@ -901,11 +902,11 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return {
             "multistages": multistages,
-            "requires_positional": requires_positional,
             "api_fields": node.api_fields,
             "arg_fields": node.arg_fields,
             "parameters": node.parameters,
             "stage_functors": stage_functors,
+            "positional_axes": positional_axes,
         }
 
     def _make_field_attributes(self, field_decl: gt_ir.FieldDecl) -> Dict[str, str]:
@@ -988,7 +989,9 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 if value is not None:
                     constants[name] = value
 
-        any_positional = any(computation["requires_positional"] for computation in computations)
+        positional_axes = sorted(
+            list({node.axis for node in gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex)})
+        )
 
         stage_functors = {}
         for computation in computations:
@@ -1006,7 +1009,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             k_axis=k_axis,
             module_name=self.module_name,
             computations=computations,
-            any_positional=any_positional,
+            positional_axes=positional_axes,
             stencil_unique_name=self.class_name,
         )
 
