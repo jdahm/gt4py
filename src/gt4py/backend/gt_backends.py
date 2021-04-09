@@ -853,7 +853,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         for name in sorted(
             list({node.axis for node in gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex)})
         ):
-            print(f"Appending domain_size_{name}")
             args.append({"name": f"domain_size_{name}", "access_type": "in", "extent": None})
 
         # Create regions and computations

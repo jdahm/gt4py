@@ -300,7 +300,7 @@ void run(const std::array<gt::uint_t, MAX_DIM>& domain,
 {%- endfor -%}
 
 {% for computation in computations %}
-{% if computation.requires_positional %}
+{% if computation.positional_axes | length > 0 %}
     auto gt_computation_{{ loop.index0 }} = gt::make_positional_computation<backend_t>(
 {%- else %}
     auto gt_computation_{{ loop.index0 }} = gt::make_computation<backend_t>(
