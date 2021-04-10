@@ -540,7 +540,7 @@ class ComputationMergingWrapper:
             field
             for field in candidate.computation.inputs
             if field in candidate.allocated_fields
-            and not candidate.computation.inputs[field].is_zero
+            and not gt_definitions.Extent(candidate.computation.inputs[field][:-1]).is_zero
         }
         # Maybe only with offset?
         self_allocated_outputs = {
