@@ -412,7 +412,10 @@ class ComputationMergingWrapper:
                 for accessor in stage.accessors
                 if isinstance(accessor, gt_ir.FieldAccessor)
                 and bool(accessor.intent & intent)
-                and (not has_nonzero_parallel_extent or not accessor.extent.is_zero)
+                and (
+                    not has_nonzero_parallel_extent
+                    or not gt_definitions.Extent(accessor.extent[:-1]).is_zero
+                )
             }
         return fields
 
