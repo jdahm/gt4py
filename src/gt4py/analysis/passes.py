@@ -1038,7 +1038,7 @@ class MergeBlocksPass(TransformPass):
             merged_blocks = cls.merge_blocks(transform_data, allocated_fields)
             new_allocated_fields = cls.detect_allocated_fields(transform_data, merged_blocks)
             if new_allocated_fields - allocated_fields:
-                allocated_fields |= new_allocated_fields
+                allocated_fields = new_allocated_fields
             else:
                 break
 
