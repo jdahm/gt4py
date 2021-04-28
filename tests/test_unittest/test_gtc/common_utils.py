@@ -62,3 +62,10 @@ class CartesianOffsetFactory(factory.Factory):
     i = 0
     j = 0
     k = 0
+
+
+class VariableVerticalOffset(factory.Factory):
+    class Meta:
+        model = common.VariableVerticalOffset
+
+    vertical = factory.SubFactory(CartesianOffsetFactory)

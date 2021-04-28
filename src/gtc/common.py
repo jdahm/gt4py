@@ -299,6 +299,13 @@ class CartesianOffset(Node):
         return {"i": self.i, "j": self.j, "k": self.k}
 
 
+class VariableVerticalOffset(Node):
+    vertical: Expr
+
+    def to_dict(self) -> Dict[str, int]:
+        return {"i": 0, "j": 0, "k": self.vertical}
+
+
 class ScalarAccess(LocNode):
     name: SymbolRef
     kind = ExprKind.SCALAR
