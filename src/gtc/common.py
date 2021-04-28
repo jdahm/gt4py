@@ -15,7 +15,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import enum
-from typing import Any, ClassVar, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union, cast
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import pydantic
 from pydantic import validator
@@ -115,6 +128,14 @@ class DataType(IntEnum):
     INT64 = 18
     FLOAT32 = 104
     FLOAT64 = 108
+
+    @classmethod
+    def integer_types(cls) -> Set[int]:
+        return {cls.INT8, cls.INT16, cls.INT32, cls.INT64}
+
+    @classmethod
+    def float_types(cls) -> Set[int]:
+        return {cls.FLOAT32, cls.FLOAT64}
 
 
 @enum.unique
@@ -315,6 +336,14 @@ class VariableVerticalOffset(Offset):
 
     def to_dict(self) -> Dict[str, int]:
         return {"i": 0, "j": 0, "k": self.vertical}
+
+    @validator("vertical")
+    def _vertical_has_int_dtype(cls, vertical: Expr) -> Expr:
+        if vertical.dtype and vertical.dtype not in DataType.integer_types():
+            raise ValueError(
+                "Vertical offset expression in `{}` must be boolean.".format(cls.__name__)
+            )
+        return vertical
 
 
 class ScalarAccess(LocNode):
