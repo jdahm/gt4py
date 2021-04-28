@@ -228,6 +228,16 @@ class Expr(LocNode):
         super().__init__(*args, **kwargs)
 
 
+class Offset(LocNode):
+    """Base class for accesses/offsets to fields."""
+
+    # TODO Eve could provide support for making a node abstract
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        if type(self) is Expr:
+            raise TypeError("Trying to instantiate `Offset` abstract class.")
+        super().__init__(*args, **kwargs)
+
+
 class Stmt(LocNode):
     # TODO Eve could provide support for making a node abstract
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -284,9 +294,10 @@ class Literal(Node):
 StmtT = TypeVar("StmtT", bound=Stmt)
 ExprT = TypeVar("ExprT", bound=Expr)
 TargetT = TypeVar("TargetT", bound=Expr)
+OffsetT = TypeVar("OffsetT", bound=Offset)
 
 
-class CartesianOffset(Node):
+class CartesianOffset(Offset):
     i: int
     j: int
     k: int
@@ -299,7 +310,7 @@ class CartesianOffset(Node):
         return {"i": self.i, "j": self.j, "k": self.k}
 
 
-class VariableVerticalOffset(Node):
+class VariableVerticalOffset(Offset):
     vertical: Expr
 
     def to_dict(self) -> Dict[str, int]:
@@ -311,14 +322,24 @@ class ScalarAccess(LocNode):
     kind = ExprKind.SCALAR
 
 
-class FieldAccess(LocNode):
+class FieldAccess(GenericNode, Generic[OffsetT]):
     name: SymbolRef
-    offset: CartesianOffset
+    offset: Offset
     kind = ExprKind.FIELD
 
     @classmethod
     def centered(cls, *, name: str, loc: SourceLocation = None) -> "FieldAccess":
         return cls(name=name, loc=loc, offset=CartesianOffset.zero())
+
+    @classmethod
+    def variable_vertical(
+        cls, *, name: str, vertical_name: str, loc: SourceLocation = None
+    ) -> "FieldAccess":
+        return cls(
+            name=name,
+            loc=loc,
+            offset=VariableVerticalOffset(vertical=FieldAccess.centered(name=vertical_name)),
+        )
 
 
 class BlockStmt(GenericNode, SymbolTableTrait, Generic[StmtT]):
