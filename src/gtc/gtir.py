@@ -47,6 +47,14 @@ class Expr(common.Expr):
         super().__init__(*args, **kwargs)
 
 
+class Offset(common.Offset):
+    # TODO Eve could provide support for making a node abstract
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        if type(self) is Stmt:
+            raise TypeError("Trying to instantiate `Stmt` abstract class.")
+        super().__init__(*args, **kwargs)
+
+
 class Stmt(common.Stmt):
     # TODO Eve could provide support for making a node abstract
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -63,11 +71,11 @@ class Literal(common.Literal, Expr):  # type: ignore
     pass
 
 
-class CartesianOffset(common.CartesianOffset):
+class CartesianOffset(common.CartesianOffset, Offset):
     pass
 
 
-class VariableVerticalOffset(common.VariableVerticalOffset):
+class VariableVerticalOffset(common.VariableVerticalOffset, Offset):
     pass
 
 
@@ -76,7 +84,15 @@ class ScalarAccess(common.ScalarAccess, Expr):  # type: ignore
 
 
 class FieldAccess(common.FieldAccess, Expr):  # type: ignore
-    pass
+    @classmethod
+    def variable_vertical(
+        cls, *, name: str, vertical_name: str, loc: common.SourceLocation = None
+    ) -> "FieldAccess":
+        return cls(
+            name=name,
+            loc=loc,
+            offset=VariableVerticalOffset(k=cls.centered(name=vertical_name)),
+        )
 
 
 class ParAssignStmt(common.AssignStmt[FieldAccess, Expr], Stmt):

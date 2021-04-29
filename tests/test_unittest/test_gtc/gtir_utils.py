@@ -38,6 +38,13 @@ class FieldAccessFactory(factory.Factory):
     dtype = common.DataType.FLOAT32
 
 
+class VariableVerticalOffset(factory.Factory):
+    class Meta:
+        model = common.VariableVerticalOffset
+
+    k = factory.SubFactory(FieldAccessFactory)
+
+
 class ScalarAccessFactory(factory.Factory):
     class Meta:
         model = gtir.ScalarAccess

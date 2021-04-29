@@ -318,7 +318,7 @@ TargetT = TypeVar("TargetT", bound=Expr)
 OffsetT = TypeVar("OffsetT", bound=Offset)
 
 
-class CartesianOffset(Offset):
+class CartesianOffset(Node):
     i: int
     j: int
     k: int
@@ -331,19 +331,27 @@ class CartesianOffset(Offset):
         return {"i": self.i, "j": self.j, "k": self.k}
 
 
-class VariableVerticalOffset(Offset):
-    vertical: Expr
+class VariableVerticalOffset(GenericNode, Generic[ExprT]):
+    k: ExprT
+
+    @property
+    def i(self) -> int:
+        return 0
+
+    @property
+    def j(self) -> int:
+        return 0
 
     def to_dict(self) -> Dict[str, int]:
-        return {"i": 0, "j": 0, "k": self.vertical}
+        return {"i": self.i, "j": self.j, "k": self.k}
 
-    @validator("vertical")
-    def _vertical_has_int_dtype(cls, vertical: Expr) -> Expr:
-        if vertical.dtype and vertical.dtype not in DataType.integer_types():
+    @validator("k")
+    def _vertical_has_int_dtype(cls, k: Expr) -> Expr:
+        if k.dtype and k.dtype not in DataType.integer_types():
             raise ValueError(
                 "Vertical offset expression in `{}` must be boolean.".format(cls.__name__)
             )
-        return vertical
+        return k
 
 
 class ScalarAccess(LocNode):
@@ -353,22 +361,12 @@ class ScalarAccess(LocNode):
 
 class FieldAccess(GenericNode, Generic[OffsetT]):
     name: SymbolRef
-    offset: Offset
+    offset: OffsetT
     kind = ExprKind.FIELD
 
     @classmethod
     def centered(cls, *, name: str, loc: SourceLocation = None) -> "FieldAccess":
         return cls(name=name, loc=loc, offset=CartesianOffset.zero())
-
-    @classmethod
-    def variable_vertical(
-        cls, *, name: str, vertical_name: str, loc: SourceLocation = None
-    ) -> "FieldAccess":
-        return cls(
-            name=name,
-            loc=loc,
-            offset=VariableVerticalOffset(vertical=FieldAccess.centered(name=vertical_name)),
-        )
 
 
 class BlockStmt(GenericNode, SymbolTableTrait, Generic[StmtT]):

@@ -106,6 +106,62 @@ def test_copy(copy_computation):
     assert copy_computation.param_names == ["foo", "bar"]
 
 
+def variable_offset_assign():
+    yield ParAssignStmt(
+        loc=SourceLocation(line=3, column=2, source="copy_gtir"),
+        left=FieldAccess.centered(
+            name="foo", loc=SourceLocation(line=3, column=1, source="copy_gtir")
+        ),
+        right=FieldAccess.variable_vertical(
+            name="bar",
+            vertical_name="boop",
+            loc=SourceLocation(line=3, column=3, source="copy_gtir"),
+        ),
+    )
+
+
+@pytest.fixture
+def copy_v_loop_voffset(variable_offset_assign, interval):
+    yield VerticalLoop(
+        loc=SourceLocation(line=2, column=1, source="copy_gtir"),
+        loop_order=LoopOrder.FORWARD,
+        interval=interval,
+        body=[variable_offset_assign],
+        temporaries=[],
+    )
+
+
+def test_copy_vertical_offset_computation(copy_v_loop_voffset):
+    def make_stencil(dtype):
+        return Stencil(
+            name="copy_gtir",
+            loc=SourceLocation(line=1, column=1, source="copy_gtir"),
+            params=[
+                FieldDecl(
+                    name="foo",
+                    dtype=DataType.FLOAT32,
+                    dimensions=(True, True, True),
+                ),
+                FieldDecl(
+                    name="bar",
+                    dtype=DataType.FLOAT32,
+                    dimensions=(True, True, True),
+                ),
+                FieldDecl(
+                    name="boop",
+                    dtype=DataType.FLOAT32,
+                    dimensions=(True, True, True),
+                ),
+            ],
+            vertical_loops=[copy_v_loop_voffset],
+        )
+
+    with pytest.raises(ValueError, match="must be an integer type"):
+        make_stencil(DataType.FLOAT32)
+
+    make_stencil(DataType.INT32)
+
+
 @pytest.mark.parametrize(
     "invalid_node",
     [Decl, Expr, Stmt],
