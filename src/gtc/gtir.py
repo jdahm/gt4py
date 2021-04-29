@@ -32,7 +32,7 @@ from typing import Any, Generator, List, Set, Tuple
 from pydantic import validator
 from pydantic.class_validators import root_validator
 
-from eve import Node, Str, SymbolName, SymbolTableTrait, utils
+from eve import Node, Str, SymbolName, SymbolTableTrait, field, utils
 from eve.iterators import TreeIterationItem
 from eve.typingx import RootValidatorValuesType
 from gtc import common
@@ -203,6 +203,7 @@ class Decl(LocNode):  # TODO probably Stmt
 
 class FieldDecl(Decl):
     dimensions: Tuple[bool, bool, bool]
+    data_dims: Tuple[int, ...] = field(default_factory=tuple)
 
 
 class ScalarDecl(Decl):
