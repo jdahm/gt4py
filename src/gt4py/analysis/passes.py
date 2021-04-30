@@ -339,6 +339,12 @@ class InitInfoPass(TransformPass):
 
             result = StatementInfo(self.data.id_generator.new, node, inputs, body_stmt_info.outputs)
 
+        def visit_HorizontalIf(self, node: gt_ir.HorizontalIf):
+            body_info = self.visit(node.body)
+            result = StatementInfo(
+                self.data.id_generator.new, node, body_info.inputs, body_info.outputs
+            )
+
             return result
 
         def visit_BlockStmt(self, node: gt_ir.BlockStmt):
@@ -346,8 +352,11 @@ class InitInfoPass(TransformPass):
             outputs = set()
             for stmt in node.stmts:
                 stmt_info = self.visit(stmt)
-                inputs = self._merge_extents(list(inputs.items()) + list(stmt_info.inputs.items()))
-                outputs |= stmt_info.outputs
+                if stmt_info:
+                    inputs = self._merge_extents(
+                        list(inputs.items()) + list(stmt_info.inputs.items())
+                    )
+                    outputs |= stmt_info.outputs
 
             result = StatementInfo(self.data.id_generator.new, node, inputs, outputs)
 
@@ -656,6 +665,10 @@ class MultiStageMergingWrapper:
     def domain(self) -> gt_ir.Domain:
         return self.parent.definition_ir.domain
 
+    @property
+    def domain(self) -> gt_ir.Domain:
+        return self.parent.definition_ir.domain
+
 
 class StageMergingWrapper:
     """Wrapper for :class:`IJBlockInfo` containing the logic required to merge or not merge."""
@@ -866,6 +879,10 @@ class StageMergingWrapper:
     def domain(self) -> gt_ir.Domain:
         return self.parent.definition_ir.domain
 
+    @property
+    def domain(self) -> gt_ir.Domain:
+        return self.parent.definition_ir.domain
+
 
 def greedy_merging(items: Sequence[MergeableType]) -> List[MergeableType]:
     if len(items) < 2:
@@ -918,8 +935,78 @@ class MergeBlocksPass(TransformPass):
         transform_data.blocks = merged_blocks
 
 
+def overlap_with_extent(
+    interval: gt_ir.AxisInterval, axis_extent: Tuple[int, int]
+) -> Optional[Tuple[int, int]]:
+    """Return a tuple of the distances to the edge of the compute domain, if overlapping."""
+    LARGE_NUM = 10000
+
+    if interval.start.level == gt_ir.LevelMarker.START:
+        start_diff = axis_extent[0] - interval.start.offset
+    else:
+        start_diff = None
+
+    if interval.end.level == gt_ir.LevelMarker.END:
+        end_diff = axis_extent[1] - interval.end.offset
+    else:
+        end_diff = None
+
+    if start_diff is not None and start_diff > 0 and end_diff is None:
+        if interval.end.offset <= axis_extent[0]:
+            return None
+    elif end_diff is not None and end_diff < 0 and start_diff is None:
+        if interval.start.offset > axis_extent[1]:
+            return None
+
+    start_diff = min(start_diff, 0) if start_diff is not None else -LARGE_NUM
+    end_diff = max(end_diff, 0) if end_diff is not None else LARGE_NUM
+    return (start_diff, end_diff)
+
+
+def compute_extent_diff(
+    compute_extent: gt_ir.Extent, intervals: Dict[str, gt_ir.AxisInterval]
+) -> Optional[Extent]:
+    parallel_axes_names = tuple(axis.name for axis in gt_ir.Domain.LatLonGrid().parallel_axes)
+
+    diffs = []
+    for axis, extent in zip(parallel_axes_names, compute_extent):
+        interval = intervals[axis]
+        diff = overlap_with_extent(interval, extent)
+        if not diff:
+            return None
+        else:
+            diffs.append(diff)
+
+    return Extent(diffs + [(0, 0)])
+
+
+class RemoveUnreachedStatementsPass(TransformPass):
+    """Remove unreached HorizontalIf statements."""
+
+    @staticmethod
+    def filter_domain_block(dom_block: DomainBlockInfo) -> None:
+        for ij_block in dom_block.ij_blocks:
+            for int_block in ij_block.interval_blocks:
+                stmt_infos = []
+                for stmt_info in int_block.stmts:
+                    stmt = stmt_info.stmt
+                    if not isinstance(stmt, gt_ir.HorizontalIf) or (
+                        compute_extent_diff(ij_block.compute_extent, stmt.intervals) is not None
+                    ):
+                        stmt_infos.append(stmt_info)
+                int_block.stmts = stmt_infos
+
+    @classmethod
+    def apply(cls, transform_data: TransformData) -> None:
+        for dom_block in transform_data.blocks:
+            cls.filter_domain_block(dom_block)
+
+
 class ComputeExtentsPass(TransformPass):
     """Loop over blocks backwards and accumulate extents.
+
+    This includes computing extents for the HorizontalIf blocks, and marking these
+    for deletion if they are unused.
 
     Note
     ----
@@ -938,9 +1025,8 @@ class ComputeExtentsPass(TransformPass):
         seq_axis = transform_data.definition_ir.domain.index(
             transform_data.definition_ir.domain.sequential_axis
         )
-        access_extents = {}
-        for name in transform_data.symbols:
-            access_extents[name] = Extent.zeros()
+
+        access_extents = {name: Extent.zeros() for name in transform_data.symbols}
 
         blocks = transform_data.blocks
         for dom_block in reversed(blocks):
@@ -949,15 +1035,21 @@ class ComputeExtentsPass(TransformPass):
                 for name in ij_block.outputs:
                     ij_block.compute_extent |= access_extents[name]
                 for int_block in ij_block.interval_blocks:
-                    for name, extent in int_block.inputs.items():
-                        extent = Extent(
-                            list(extent[:seq_axis]) + [(0, 0)]
-                        )  # exclude sequential axis
-                        accumulated_extent = ij_block.compute_extent + extent
-                        access_extents[name] |= accumulated_extent
+                    for stmt_info in int_block.stmts:
+                        if isinstance(stmt_info.stmt, gt_ir.HorizontalIf):
+                            extent_from_edge = compute_extent_diff(
+                                ij_block.compute_extent, stmt_info.stmt.intervals
+                            )
+                        else:
+                            extent_from_edge = Extent.zeros()
+                        if extent_from_edge is not None:
+                            for name, extent in stmt_info.inputs.items():
+                                access_extents[name] |= (
+                                    ij_block.compute_extent - extent_from_edge
+                                ) + Extent(list(extent[:seq_axis]) + [(0, 0)])
 
         transform_data.implementation_ir.fields_extents = {
-            name: Extent(extent) for name, extent in access_extents.items()
+            name: extent for name, extent in access_extents.items()
         }
 
 
@@ -1278,6 +1370,11 @@ class DemoteLocalTemporariesToVariablesPass(TransformPass):
 
     This may occur because these can be local variables in the scope, and
     therefore do not need to be fields.
+
+    A field can be demoted when it is a temporary field that:
+    1. is never used with an offset,
+    2. is never read before assigned to in any stage, and
+    3. is never used in a horizontal region
     """
 
     class CollectDemotableSymbols(gt_ir.IRNodeVisitor):
@@ -1293,25 +1390,40 @@ class DemoteLocalTemporariesToVariablesPass(TransformPass):
             }
             """Dictionary mapping temporaries to their most recently referenced stage."""
             self.visit(node)
+
             return set(self.demotables.keys())
 
         def visit_Stage(self, node: gt_ir.Stage, **kwargs: Any) -> None:
-            kwargs["stage_name"] = node.name
-            self.generic_visit(node, **kwargs)
+            self.generic_visit(node, **kwargs, stage_name=node.name, is_write=False)
 
         def visit_Assign(self, node: gt_ir.Assign, **kwargs: Any) -> None:
+            kwargs["is_write"] = False
             self.visit(node.value, **kwargs)
-            if node.target.name in self.demotables:
-                self.demotables[node.target.name] = kwargs["stage_name"]
+            kwargs["is_write"] = True
+            self.visit(node.target, **kwargs)
+
+        def visit_HorizontalIf(self, node: gt_ir.HorizontalIf, **kwargs) -> None:
+            self.visit(node.body, inside_horizontal_if=True, **kwargs)
 
         def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs: Any) -> None:
-            field_name = node.name
-            if field_name in self.demotables:
-                assert self.demotables[field_name], f"Temporary {field_name} has no stage."
-                if kwargs["stage_name"] != self.demotables[field_name] or any(
-                    val != 0 for val in node.offset.values()
-                ):
-                    self.demotables.pop(field_name)
+            if node.name in self.demotables:
+                not_demotable = False
+                if not kwargs["is_write"]:
+                    # 1. is never used with an offset
+                    not_demotable = any(val != 0 for val in node.offset.values())
+
+                    # 2. is never read before assigned to in any stage
+                    not_demotable = (
+                        not_demotable or kwargs["stage_name"] != self.demotables[node.name]
+                    )
+                else:
+                    self.demotables[node.name] = kwargs["stage_name"]
+
+                if not_demotable:
+                    self.demotables.pop(node.name)
+                elif kwargs.get("inside_horizontal_if", False):
+                    # 3. is never used in a horizontal region
+                    self.demotables.pop(node.name)
 
     class DemoteSymbols(gt_ir.IRNodeMapper):
         @classmethod
