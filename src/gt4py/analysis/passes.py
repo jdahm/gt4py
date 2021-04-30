@@ -17,7 +17,7 @@
 """Definitions and utilities used by all the analysis pipeline components.
 """
 
-import functools
+import copy
 import itertools
 import warnings
 from typing import (
@@ -594,6 +594,10 @@ class MultiStageMergingWrapper:
         return not all(extent.is_zero for extent in specific_extents)
 
     @property
+    def api_fields_names(self) -> List[str]:
+        return [decl.name for decl in self.parent.definition_ir.api_fields]
+
+    @property
     def parallel_axes_indices(self) -> List[int]:
         axes = self.domain.axes if self.k_offset_extends_domain else self.domain.parallel_axes
         return [self.domain.index(axis) for axis in axes]
@@ -601,10 +605,6 @@ class MultiStageMergingWrapper:
     @property
     def sequential_axis_index(self) -> int:
         return self.domain.index(self.domain.sequential_axis)
-
-    @property
-    def api_fields_names(self) -> List[str]:
-        return [decl.name for decl in self.parent.definition_ir.api_fields]
 
     @property
     def k_offset_extends_domain(self) -> bool:
@@ -634,12 +634,16 @@ class MultiStageMergingWrapper:
         return self._multi_stage.outputs
 
     @property
+    def wrapped(self) -> DomainBlockInfo:
+        return self._multi_stage
+
+    @property
     def parent(self) -> TransformData:
         return self._parent
 
     @property
-    def wrapped(self) -> DomainBlockInfo:
-        return self._multi_stage
+    def domain(self) -> gt_ir.Domain:
+        return self.parent.definition_ir.domain
 
     @property
     def domain(self) -> gt_ir.Domain:
@@ -680,8 +684,6 @@ class StageMergingWrapper:
         # Check for read with offset and write on parallel axes between stages
         if self.has_disallowed_read_with_offset_and_write(candidate):
             return False
-
-        self.has_incompatible_intervals_with(candidate)
 
         return True
 
@@ -814,10 +816,6 @@ class StageMergingWrapper:
         )
 
     @property
-    def parent_block(self) -> DomainBlockInfo:
-        return self._parent_block
-
-    @property
     def compute_extent(self) -> Extent:
         return self._stage.compute_extent
 
@@ -846,12 +844,20 @@ class StageMergingWrapper:
         return self._parent.min_k_interval_sizes
 
     @property
+    def wrapped(self) -> IJBlockInfo:
+        return self._stage
+
+    @property
+    def parent_block(self) -> DomainBlockInfo:
+        return self._parent_block
+
+    @property
     def parent(self) -> TransformData:
         return self._parent
 
     @property
-    def wrapped(self) -> IJBlockInfo:
-        return self._stage
+    def domain(self) -> gt_ir.Domain:
+        return self.parent.definition_ir.domain
 
     @property
     def domain(self) -> gt_ir.Domain:
@@ -1465,6 +1471,91 @@ class DemoteLocalTemporariesToVariablesPass(TransformPass):
         cls.DemoteSymbols.apply(transform_data.implementation_ir, demotables)
 
 
+class ConstantFoldingPass(TransformPass):
+    """Demote temporary fields to constants if only assigned to a single scalar value."""
+
+    class CollectConstants(gt_ir.IRNodeVisitor):
+        @classmethod
+        def apply(cls, node: gt_ir.StencilImplementation) -> Set[str]:
+            collector = cls()
+            return collector(node)
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> Set[str]:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            self.constants = {field: 0 for field in node.temporary_fields}
+            self.visit(node)
+            return set(self.constants.keys())
+
+        def visit_If(self, node: gt_ir.If, **kwargs: Any) -> None:
+            for stmt in node.main_body.stmts:
+                self.visit(stmt, in_condition=True)
+            if node.else_body:
+                for stmt in node.else_body.stmts:
+                    self.visit(stmt, in_condition=True)
+
+        def visit_Assign(self, node: gt_ir.Assign, **kwargs: Any) -> None:
+            target_name = node.target.name
+            if target_name in self.constants:
+                self.constants[target_name] += 1
+                if (
+                    not isinstance(node.value, gt_ir.ScalarLiteral)
+                    or self.constants[target_name] > 1
+                    or kwargs.get("in_condition", False)
+                ):
+                    self.constants.pop(target_name)
+
+    class ConstantFolder(gt_ir.IRNodeMapper):
+        @classmethod
+        def apply(cls, node: gt_ir.StencilImplementation, constants: Set[str]) -> None:
+            instance = cls(constants)
+            return instance(node)
+
+        def __init__(self, constants: Set[str]):
+            self.literals: Dict[str, gt_ir.ScalarLiteral] = {name: None for name in constants}
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> gt_ir.StencilImplementation:
+            return self.visit(node)
+
+        def visit_StencilImplementation(
+            self, path: tuple, node_name: str, node: gt_ir.StencilImplementation
+        ) -> gt_ir.StencilImplementation:
+            res = self.generic_visit(path, node_name, node)
+            for name in self.literals:
+                node.fields.pop(name)
+                node.fields_extents.pop(name)
+            return res
+
+        def visit_FieldAccessor(
+            self, path: tuple, node_name: str, node: gt_ir.FieldAccessor
+        ) -> Tuple[bool, Optional[gt_ir.FieldAccessor]]:
+            if node.symbol in self.literals:
+                return False, None
+            else:
+                return True, node
+
+        def visit_Assign(self, path: tuple, node_name: str, node: gt_ir.Assign):
+            node.value = self.visit(node.value)
+            target_name = node.target.name
+            if target_name in self.literals:
+                self.literals[target_name] = copy.deepcopy(node.value)
+                return False, None
+            return True, node
+
+        def visit_FieldRef(
+            self, path: tuple, node_name: str, node: gt_ir.FieldRef
+        ) -> Tuple[bool, gt_ir.FieldRef]:
+            if node.name in self.literals:
+                return True, self.literals[node.name]
+            return True, node
+
+    @classmethod
+    def apply(cls, transform_data: TransformData) -> None:
+        constants = cls.CollectConstants.apply(transform_data.implementation_ir)
+        if constants:
+            cls.ConstantFolder.apply(transform_data.implementation_ir, constants)
+        return transform_data
+
+
 class HousekeepingPass(TransformPass):
     class WarnIfNoEffect(gt_ir.IRNodeVisitor):
         """Warn if StencilImplementation has no effect."""
@@ -1505,14 +1596,27 @@ class HousekeepingPass(TransformPass):
             assert isinstance(node, gt_ir.StencilImplementation)
             self.visit(node)
 
+        def visit_ApplyBlock(
+            self, path: tuple, node_name: str, node: gt_ir.ApplyBlock
+        ) -> Tuple[bool, Optional[gt_ir.ApplyBlock]]:
+            self.generic_visit(path, node_name, node.body)
+            if node.body.stmts:
+                return True, node
+            else:
+                return False, None
+
         def visit_Stage(
             self, path: tuple, node_name: str, node: gt_ir.Stage
         ) -> Tuple[bool, Optional[gt_ir.Stage]]:
             self.generic_visit(path, node_name, node)
 
-            if any(
-                isinstance(a, gt_ir.FieldAccessor) and (a.intent is gt_ir.AccessIntent.READ_WRITE)
-                for a in node.accessors
+            if (
+                any(
+                    isinstance(a, gt_ir.FieldAccessor)
+                    and (a.intent is gt_ir.AccessIntent.READ_WRITE)
+                    for a in node.accessors
+                )
+                and node.apply_blocks
             ):
                 return True, node
             else:
