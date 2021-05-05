@@ -339,6 +339,8 @@ class InitInfoPass(TransformPass):
 
             result = StatementInfo(self.data.id_generator.new, node, inputs, body_stmt_info.outputs)
 
+            return result
+
         def visit_HorizontalIf(self, node: gt_ir.HorizontalIf):
             body_info = self.visit(node.body)
             result = StatementInfo(
