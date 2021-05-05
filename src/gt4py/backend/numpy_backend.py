@@ -502,6 +502,8 @@ class NumPySourceGenerator(PythonSourceGenerator):
 
         sources.append(" " * self.indent_size + condition_statement)
 
+        return sources
+
     def visit_HorizontalIf(self, node: gt_ir.HorizontalIf, **kwargs) -> List[str]:
         sources = []
         for stmt in node.body.stmts:
