@@ -730,6 +730,23 @@ class AxisBound(Node):
         return not self < other
 
 
+@enum.unique
+class AxisEndpoint(IntEnum):
+    START = enum.auto()
+    END = enum.auto()
+
+
+class AxisInterval(Node):
+    start: Union[AxisEndpoint, AxisBound]
+    end: Union[AxisEndpoint, AxisBound]
+
+
+class HorizontalIf(GenericNode, Generic[StmtT]):
+    i: AxisInterval
+    j: AxisInterval
+    body: List[StmtT]
+
+
 def data_type_to_typestr(dtype: DataType) -> str:
 
     table = {

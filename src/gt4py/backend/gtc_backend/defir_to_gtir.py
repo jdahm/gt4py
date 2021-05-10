@@ -29,8 +29,10 @@ from gt4py.ir.nodes import (
     BuiltinLiteral,
     Cast,
     ComputationBlock,
+    Domain,
     FieldDecl,
     FieldRef,
+    HorizontalIf,
     If,
     IterationOrder,
     LevelMarker,
@@ -180,6 +182,43 @@ class DefIRToGTIR(IRNodeVisitor):
 
     def visit_BlockStmt(self, node: BlockStmt) -> List[gtir.Stmt]:
         return [self.visit(s) for s in node.stmts]
+
+    def visit_HorizontalIf(self, node: HorizontalIf) -> gtir.HorizontalIf:
+        axes = {}
+        for axis in Domain.LatLonGrid().parallel_axes:
+            interval = node.intervals[axis.name]
+
+            bound = interval.start
+            if bound.offset < -1000:
+                start_bound = common.AxisEndpoint.START
+            else:
+                start_bound = common.AxisBound(
+                    level=(
+                        common.LevelMarker.START
+                        if bound.level == LevelMarker.START
+                        else common.LevelMarker.END
+                    ),
+                    offset=bound.offset,
+                )
+
+            bound = interval.end
+            if bound.offset > 1000:
+                end_bound = common.AxisEndpoint.END
+            else:
+                end_bound = common.AxisBound(
+                    level=(
+                        common.LevelMarker.START
+                        if bound.level == LevelMarker.START
+                        else common.LevelMarker.END
+                    ),
+                    offset=bound.offset,
+                )
+
+            axes[axis.name] = common.AxisInterval(start=start_bound, end=end_bound)
+
+        return gtir.HorizontalIf(
+            i=axes["I"], j=axes["J"], body=[self.visit(stmt) for stmt in node.body.stmts]
+        )
 
     def visit_Assign(self, node: Assign) -> gtir.ParAssignStmt:
         assert isinstance(node.target, FieldRef) or isinstance(node.target, VarRef)

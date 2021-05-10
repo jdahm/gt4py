@@ -75,6 +75,10 @@ class FieldAccess(common.FieldAccess, Expr):  # type: ignore
     pass
 
 
+class HorizontalIf(common.HorizontalIf[Stmt], Stmt):
+    pass
+
+
 class ParAssignStmt(common.AssignStmt[FieldAccess, Expr], Stmt):
     """Parallel assignment.
 
