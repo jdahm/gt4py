@@ -180,8 +180,8 @@ class DefIRToGTIR(IRNodeVisitor):
             temporaries=temporaries,
         )
 
-    def visit_BlockStmt(self, node: BlockStmt) -> List[gtir.Stmt]:
-        return [self.visit(s) for s in node.stmts]
+    def visit_BlockStmt(self, node: BlockStmt, **kwargs) -> List[gtir.Stmt]:
+        return [self.visit(s, **kwargs) for s in node.stmts]
 
     def visit_HorizontalIf(self, node: HorizontalIf) -> gtir.HorizontalIf:
         axes = {}
@@ -193,11 +193,7 @@ class DefIRToGTIR(IRNodeVisitor):
                 start_bound = common.AxisEndpoint.START
             else:
                 start_bound = common.AxisBound(
-                    level=(
-                        common.LevelMarker.START
-                        if bound.level == LevelMarker.START
-                        else common.LevelMarker.END
-                    ),
+                    level=self.GT4PY_LEVELMARKER_TO_GTIR_LEVELMARKER[bound.level],
                     offset=bound.offset,
                 )
 
@@ -206,24 +202,25 @@ class DefIRToGTIR(IRNodeVisitor):
                 end_bound = common.AxisEndpoint.END
             else:
                 end_bound = common.AxisBound(
-                    level=(
-                        common.LevelMarker.START
-                        if bound.level == LevelMarker.START
-                        else common.LevelMarker.END
-                    ),
+                    level=self.GT4PY_LEVELMARKER_TO_GTIR_LEVELMARKER[bound.level],
                     offset=bound.offset,
                 )
 
-            axes[axis.name] = common.AxisInterval(start=start_bound, end=end_bound)
+            axes[axis.name.lower()] = common.HorizontalInterval(start=start_bound, end=end_bound)
 
-        return gtir.HorizontalIf(
-            i=axes["I"], j=axes["J"], body=[self.visit(stmt) for stmt in node.body.stmts]
+        serial_assignment = common.horizontal_interval_is_serial(**axes)
+        body = gtir.BlockStmt(
+            body=[self.visit(stmt, serial_assignment=serial_assignment) for stmt in node.body.stmts]
         )
+        return gtir.HorizontalIf(**axes, body=body)
 
-    def visit_Assign(self, node: Assign) -> gtir.ParAssignStmt:
+    def visit_Assign(self, node: Assign, **kwargs) -> Union[gtir.ParAssignStmt, gtir.AssignStmt]:
         assert isinstance(node.target, FieldRef) or isinstance(node.target, VarRef)
         left = self.visit(node.target)
-        return gtir.ParAssignStmt(left=left, right=self.visit(node.value))
+        if kwargs.get("serial_assignment", False):
+            return gtir.AssignStmt(left=left, right=self.visit(node.value))
+        else:
+            return gtir.ParAssignStmt(left=left, right=self.visit(node.value))
 
     def visit_ScalarLiteral(self, node: ScalarLiteral) -> gtir.Literal:
         return gtir.Literal(value=str(node.value), dtype=common.DataType(node.data_type.value))
@@ -272,21 +269,21 @@ class DefIRToGTIR(IRNodeVisitor):
             name=node.name, offset=transform_offset(node.offset), data_index=node.data_index
         )
 
-    def visit_If(self, node: If):
+    def visit_If(self, node: If, **kwargs):
         cond = self.visit(node.condition)
         if cond.kind == ExprKind.FIELD:
             return gtir.FieldIfStmt(
                 cond=cond,
-                true_branch=gtir.BlockStmt(body=self.visit(node.main_body)),
-                false_branch=gtir.BlockStmt(body=self.visit(node.else_body))
+                true_branch=gtir.BlockStmt(body=self.visit(node.main_body, **kwargs)),
+                false_branch=gtir.BlockStmt(body=self.visit(node.else_body, **kwargs))
                 if node.else_body
                 else None,
             )
         else:
             return gtir.ScalarIfStmt(
                 cond=cond,
-                true_branch=gtir.BlockStmt(body=self.visit(node.main_body)),
-                false_branch=gtir.BlockStmt(body=self.visit(node.else_body))
+                true_branch=gtir.BlockStmt(body=self.visit(node.main_body, **kwargs)),
+                false_branch=gtir.BlockStmt(body=self.visit(node.else_body, **kwargs))
                 if node.else_body
                 else None,
             )

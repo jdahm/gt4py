@@ -14,6 +14,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import itertools
+
 import pytest
 from pydantic.error_wrappers import ValidationError
 
@@ -36,6 +38,7 @@ from .gtir_utils import (
     BinaryOpFactory,
     FieldDeclFactory,
     FieldIfStmtFactory,
+    HorizontalIfFactory,
     ParAssignStmtFactory,
     StencilFactory,
     VerticalLoopFactory,

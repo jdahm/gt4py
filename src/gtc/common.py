@@ -730,21 +730,66 @@ class AxisBound(Node):
         return not self < other
 
 
-@enum.unique
-class AxisEndpoint(IntEnum):
-    START = enum.auto()
-    END = enum.auto()
+class HorizontalInterval(Node):
+    start: Union[LevelMarker, AxisBound]
+    end: Union[LevelMarker, AxisBound]
+
+    @root_validator
+    def check_start_before_end(cls, values: RootValidatorValuesType) -> RootValidatorValuesType:
+        DOMAIN_SIZE = 1000
+        OFFSET_SIZE = 1000
+
+        if isinstance(values["start"], LevelMarker):
+            if values["start"] == LevelMarker.END:
+                raise ValueError("Level at start must be START")
+
+            start = -OFFSET_SIZE
+        else:
+            start = (
+                values["start"].offset
+                if values["start"].level == LevelMarker.START
+                else DOMAIN_SIZE + values["start"].offset
+            )
+
+        if isinstance(values["end"], LevelMarker):
+            if values["end"] == LevelMarker.START:
+                raise ValueError("Level at end must be END")
+
+            end = DOMAIN_SIZE + OFFSET_SIZE
+        else:
+            end = (
+                values["end"].offset
+                if values["end"].level == LevelMarker.START
+                else DOMAIN_SIZE + values["end"].offset
+            )
+
+        if end <= start:
+            raise ValueError("Start must come strictly before end in an interval")
+
+        return values
 
 
-class AxisInterval(Node):
-    start: Union[AxisEndpoint, AxisBound]
-    end: Union[AxisEndpoint, AxisBound]
+def horizontal_interval_is_serial(i: HorizontalInterval, j: HorizontalInterval):
+    return (
+        isinstance(i.start, AxisBound)
+        and isinstance(i.end, AxisBound)
+        and i.start.level == i.end.level
+        and i.end.offset == i.start.offset + 1
+        and isinstance(j.start, AxisBound)
+        and isinstance(j.end, AxisBound)
+        and j.start.level == j.end.level
+        and j.end.offset == j.start.offset + 1
+    )
 
 
 class HorizontalIf(GenericNode, Generic[StmtT]):
-    i: AxisInterval
-    j: AxisInterval
-    body: List[StmtT]
+    i: HorizontalInterval
+    j: HorizontalInterval
+    body: StmtT
+
+    @property
+    def single_index(self) -> bool:
+        return horizontal_interval_is_serial(self.i, self.j)
 
 
 def data_type_to_typestr(dtype: DataType) -> str:

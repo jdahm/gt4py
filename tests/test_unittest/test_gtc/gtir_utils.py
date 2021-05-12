@@ -96,6 +96,15 @@ class IntervalFactory(factory.Factory):
     end = common.AxisBound.end()
 
 
+class HorizontalIfFactory(factory.Factory):
+    class Meta:
+        model = gtir.HorizontalIf
+
+    i = common.AxisBound.start()
+    j = common.AxisBound.end()
+    body = factory.SubFactory(BlockStmtFactory)
+
+
 class FieldDeclFactory(factory.Factory):
     class Meta:
         model = gtir.FieldDecl

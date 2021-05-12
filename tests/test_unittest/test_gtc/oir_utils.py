@@ -106,6 +106,23 @@ class HorizontalExecutionFactory(factory.Factory):
     declarations: List[oir.LocalScalar] = []
 
 
+class HorizontalSpecializationFactory(factory.Factory):
+    class Meta:
+        model = oir.HorizontalSpecialization
+
+    i = factory.SubFactory(common.HorizontalIntervalFactory)
+    j = factory.SubFactory(common.HorizontalIntervalFactory)
+    expr = factory.SubFactory(FieldAccessFactory)
+
+
+class HorizontalSwitchFactory(factory.Factory):
+    class Meta:
+        model = oir.HorizontalSwitch
+
+    values = factory.List([factory.SubFactory(HorizontalSpecializationFactory)])
+    default = factory.SubFactory(LiteralFactory)
+
+
 class IntervalFactory(factory.Factory):
     class Meta:
         model = oir.Interval
