@@ -21,7 +21,7 @@ OIR represents a computation at the level of GridTools stages and multistages,
 e.g. stage merging, staged computations to compute-on-the-fly, cache annotations, etc.
 """
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import root_validator, validator
 
@@ -215,16 +215,6 @@ def horizontal_intervals_are_disjoint(
     return not (s_start <= o_start < s_end) and not (o_start <= s_start < o_end)
 
 
-def horizontal_specializations_are_disjoint(
-    self_intervals: Sequence[common.HorizontalInterval],
-    other_intervals: Sequence[common.HorizontalInterval],
-) -> bool:
-    for interval1, interval2 in zip(self_intervals, other_intervals):
-        if not horizontal_intervals_are_disjoint(interval1, interval2):
-            return False
-    return True
-
-
 class HorizontalSpecialization(Expr):
     i: common.HorizontalInterval
     j: common.HorizontalInterval
@@ -239,6 +229,19 @@ class HorizontalSpecialization(Expr):
     def kind_propagation(cls, values: RootValidatorValuesType) -> RootValidatorValuesType:
         values["kind"] = values["expr"].kind
         return values
+
+    @property
+    def intervals(self) -> Tuple[common.HorizontalInterval, common.HorizontalInterval]:
+        return (self.i, self.j)
+
+
+def horizontal_specializations_are_disjoint(
+    self: HorizontalSpecialization, other: HorizontalSpecialization
+) -> bool:
+    return any(
+        horizontal_intervals_are_disjoint(interval1, interval2)
+        for interval1, interval2 in zip(self.intervals, other.intervals)
+    )
 
 
 class HorizontalSwitch(Expr):
@@ -261,9 +264,7 @@ class HorizontalSwitch(Expr):
     ) -> List[HorizontalSpecialization]:
         for i, value in enumerate(values[:-1]):
             for other in values[i + 1 :]:
-                if not value.horizontal_iteration_spaces_are_disjoint(
-                    (value.i, value.j), (other.i, other.j)
-                ):
+                if not horizontal_specializations_are_disjoint(value, other):
                     raise ValueError("Horizontal switch values must be disjoint specializations.")
         return values
 
