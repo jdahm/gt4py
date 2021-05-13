@@ -183,7 +183,7 @@ class DefIRToGTIR(IRNodeVisitor):
     def visit_BlockStmt(self, node: BlockStmt, **kwargs: Any) -> List[gtir.Stmt]:
         return [self.visit(s, **kwargs) for s in node.stmts]
 
-    def visit_HorizontalIf(self, node: HorizontalIf) -> gtir.HorizontalIf:
+    def visit_HorizontalIf(self, node: HorizontalIf) -> gtir.HorizontalRegion:
         axes = {}
         for axis in Domain.LatLonGrid().parallel_axes:
             interval = node.intervals[axis.name]
@@ -212,16 +212,17 @@ class DefIRToGTIR(IRNodeVisitor):
         body = gtir.BlockStmt(
             body=[self.visit(stmt, serial_assignment=serial_assignment) for stmt in node.body.stmts]
         )
-        return gtir.HorizontalIf(**axes, body=body)
+        return gtir.HorizontalRegion(**axes, body=body)
 
     def visit_Assign(
         self, node: Assign, **kwargs: Any
-    ) -> Union[gtir.ParAssignStmt, gtir.AssignStmt]:
+    ) -> Union[gtir.ParAssignStmt, gtir.SerialAssignStmt]:
         assert isinstance(node.target, FieldRef) or isinstance(node.target, VarRef)
-        AssignClass = (
-            gtir.AssignStmt if kwargs.get("serial_assignment", False) else gtir.ParAssignStmt
-        )
-        return AssignClass(left=self.visit(node.target), right=self.visit(node.value))
+        if not kwargs.get("serial_assignment", False):
+            Assign = gtir.ParAssignStmt
+        else:
+            Assign = gtir.SerialAssignStmt
+        return Assign(left=self.visit(node.target), right=self.visit(node.value))
 
     def visit_ScalarLiteral(self, node: ScalarLiteral) -> gtir.Literal:
         return gtir.Literal(value=str(node.value), dtype=common.DataType(node.data_type.value))

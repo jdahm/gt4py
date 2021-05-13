@@ -770,19 +770,21 @@ class HorizontalInterval(Node):
 
 
 def horizontal_interval_is_serial(i: HorizontalInterval, j: HorizontalInterval):
-    return (
+    if not (
         isinstance(i.start, AxisBound)
         and isinstance(i.end, AxisBound)
-        and i.start.level == i.end.level
-        and i.end.offset == i.start.offset + 1
         and isinstance(j.start, AxisBound)
         and isinstance(j.end, AxisBound)
-        and j.start.level == j.end.level
-        and j.end.offset == j.start.offset + 1
-    )
+    ):
+        return False
+
+    if i.start.level != i.end.level or j.start.level != j.end.level:
+        return False
+
+    return i.end.offset == i.start.offset + 1 and j.end.offset == j.start.offset + 1
 
 
-class HorizontalIf(GenericNode, Generic[StmtT]):
+class HorizontalRegion(GenericNode, Generic[StmtT]):
     i: HorizontalInterval
     j: HorizontalInterval
     body: StmtT

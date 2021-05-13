@@ -20,7 +20,12 @@ import factory
 
 from gtc import common, oir
 
-from .common_utils import CartesianOffsetFactory, identifier, undefined_symbol_list
+from .common_utils import (
+    CartesianOffsetFactory,
+    HorizontalIntervalFactory,
+    identifier,
+    undefined_symbol_list,
+)
 
 
 class FieldAccessFactory(factory.Factory):
@@ -110,8 +115,8 @@ class HorizontalSpecializationFactory(factory.Factory):
     class Meta:
         model = oir.HorizontalSpecialization
 
-    i = factory.SubFactory(common.HorizontalIntervalFactory)
-    j = factory.SubFactory(common.HorizontalIntervalFactory)
+    i = factory.SubFactory(HorizontalIntervalFactory)
+    j = factory.SubFactory(HorizontalIntervalFactory)
     expr = factory.SubFactory(FieldAccessFactory)
 
 

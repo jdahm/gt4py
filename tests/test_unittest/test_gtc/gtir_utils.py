@@ -18,7 +18,12 @@ import factory
 
 from gtc import common, gtir
 
-from .common_utils import CartesianOffsetFactory, identifier, undefined_symbol_list
+from .common_utils import (
+    CartesianOffsetFactory,
+    HorizontalIntervalFactory,
+    identifier,
+    undefined_symbol_list,
+)
 
 
 class LiteralFactory(factory.Factory):
@@ -49,6 +54,14 @@ class ScalarAccessFactory(factory.Factory):
 class ParAssignStmtFactory(factory.Factory):
     class Meta:
         model = gtir.ParAssignStmt
+
+    left = factory.SubFactory(FieldAccessFactory)
+    right = factory.SubFactory(FieldAccessFactory)
+
+
+class SerialAssignStmtFactory(factory.Factory):
+    class Meta:
+        model = gtir.SerialAssignStmt
 
     left = factory.SubFactory(FieldAccessFactory)
     right = factory.SubFactory(FieldAccessFactory)
@@ -96,12 +109,12 @@ class IntervalFactory(factory.Factory):
     end = common.AxisBound.end()
 
 
-class HorizontalIfFactory(factory.Factory):
+class HorizontalRegionFactory(factory.Factory):
     class Meta:
-        model = gtir.HorizontalIf
+        model = gtir.HorizontalRegion
 
-    i = common.AxisBound.start()
-    j = common.AxisBound.end()
+    i = factory.SubFactory(HorizontalIntervalFactory)
+    j = factory.SubFactory(HorizontalIntervalFactory)
     body = factory.SubFactory(BlockStmtFactory)
 
 

@@ -288,37 +288,3 @@ def test_assign_to_ik_fwd():
                 ],
             ),
         )
-
-
-def test_overlapping_horizontal_switch():
-    with pytest.raises(ValidationError, match="must be disjoint specializations"):
-        ParAssignStmtFactory(
-            right=HorizontalSwitchFactory(
-                values=[HorizontalSpecializationFactory(), HorizontalSpecializationFactory()]
-            )
-        )
-
-
-@pytest.fixture
-def field_access():
-    return FieldAccessFactory(name="field")
-
-
-@pytest.fixture
-def corner_specializations(field_access):
-    specializations = []
-    for i_level, j_level in itertools.product(LevelMarker, LevelMarker):
-        i_interval = HorizontalInterval(
-            start=AxisBound(level=i_level, offset=0), end=AxisBound(level=i_level, offset=1)
-        )
-        j_interval = HorizontalInterval(
-            start=AxisBound(level=j_level, offset=0), end=AxisBound(level=j_level, offset=1)
-        )
-        specializations.append(
-            HorizontalSpecializationFactory(i=i_interval, j=j_interval, expr=field_access)
-        )
-    return specializations
-
-
-def test_horizontal_switch_corner_specializations(corner_specializations):
-    ParAssignStmtFactory(right=HorizontalSwitchFactory(values=corner_specializations))
