@@ -14,7 +14,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from typing import Dict, List, Union, cast
+from typing import Any, Dict, List, Union, cast
 
 from gt4py.ir import IRNodeVisitor
 from gt4py.ir.nodes import (
@@ -122,7 +122,7 @@ class DefIRToGTIR(IRNodeVisitor):
     }
 
     @classmethod
-    def apply(cls, root, **kwargs):
+    def apply(cls, root, **kwargs: Any):
         return cls().visit(root)
 
     def __init__(self):
@@ -180,7 +180,7 @@ class DefIRToGTIR(IRNodeVisitor):
             temporaries=temporaries,
         )
 
-    def visit_BlockStmt(self, node: BlockStmt, **kwargs) -> List[gtir.Stmt]:
+    def visit_BlockStmt(self, node: BlockStmt, **kwargs: Any) -> List[gtir.Stmt]:
         return [self.visit(s, **kwargs) for s in node.stmts]
 
     def visit_HorizontalIf(self, node: HorizontalIf) -> gtir.HorizontalIf:
@@ -214,13 +214,14 @@ class DefIRToGTIR(IRNodeVisitor):
         )
         return gtir.HorizontalIf(**axes, body=body)
 
-    def visit_Assign(self, node: Assign, **kwargs) -> Union[gtir.ParAssignStmt, gtir.AssignStmt]:
+    def visit_Assign(
+        self, node: Assign, **kwargs: Any
+    ) -> Union[gtir.ParAssignStmt, gtir.AssignStmt]:
         assert isinstance(node.target, FieldRef) or isinstance(node.target, VarRef)
-        left = self.visit(node.target)
-        if kwargs.get("serial_assignment", False):
-            return gtir.AssignStmt(left=left, right=self.visit(node.value))
-        else:
-            return gtir.ParAssignStmt(left=left, right=self.visit(node.value))
+        AssignClass = (
+            gtir.AssignStmt if kwargs.get("serial_assignment", False) else gtir.ParAssignStmt
+        )
+        return AssignClass(left=self.visit(node.target), right=self.visit(node.value))
 
     def visit_ScalarLiteral(self, node: ScalarLiteral) -> gtir.Literal:
         return gtir.Literal(value=str(node.value), dtype=common.DataType(node.data_type.value))
@@ -269,7 +270,7 @@ class DefIRToGTIR(IRNodeVisitor):
             name=node.name, offset=transform_offset(node.offset), data_index=node.data_index
         )
 
-    def visit_If(self, node: If, **kwargs):
+    def visit_If(self, node: If, **kwargs: Any):
         cond = self.visit(node.condition)
         if cond.kind == ExprKind.FIELD:
             return gtir.FieldIfStmt(
@@ -288,7 +289,7 @@ class DefIRToGTIR(IRNodeVisitor):
                 else None,
             )
 
-    def visit_VarRef(self, node: VarRef, **kwargs):
+    def visit_VarRef(self, node: VarRef, **kwargs: Any):
         # TODO(havogt) seems wrong, but check the DefinitionIR for
         # test_code_generation.py::test_generation_cpu[native_functions,
         # there we have a FieldAccess on a VarDecl
