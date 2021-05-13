@@ -305,12 +305,7 @@ def test_overlapping_horizontal_switch():
 
 
 @pytest.fixture
-def field_access():
-    return FieldAccessFactory(name="field")
-
-
-@pytest.fixture
-def corner_specializations(field_access):
+def corner_specializations():
     specializations = []
     for i_level, j_level in itertools.product(LevelMarker, LevelMarker):
         i_interval = HorizontalInterval(
@@ -320,10 +315,14 @@ def corner_specializations(field_access):
             start=AxisBound(level=j_level, offset=0), end=AxisBound(level=j_level, offset=1)
         )
         specializations.append(
-            HorizontalSpecializationFactory(i=i_interval, j=j_interval, expr=field_access)
+            HorizontalSpecializationFactory(
+                i=i_interval, j=j_interval, expr__name="field", expr__offset__i=1
+            )
         )
     return specializations
 
 
 def test_horizontal_switch_corner_specializations(corner_specializations):
-    AssignStmtFactory(right=HorizontalSwitchFactory(values=corner_specializations))
+    AssignStmtFactory(
+        left__name="field", right=HorizontalSwitchFactory(values=corner_specializations)
+    )
