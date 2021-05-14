@@ -794,6 +794,10 @@ class HorizontalMask(GenericNode, Generic[ExprT]):
     def single_index(self) -> bool:
         return horizontal_interval_is_serial(self.i, self.j)
 
+    @property
+    def intervals(self) -> Tuple[HorizontalInterval, HorizontalInterval]:
+        return (self.i, self.j)
+
 
 def data_type_to_typestr(dtype: DataType) -> str:
 

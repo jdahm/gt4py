@@ -218,8 +218,7 @@ class HorizontalMask(common.HorizontalMask[Expr], Expr):
 
 
 class HorizontalSpecialization(Expr):
-    i: common.HorizontalInterval
-    j: common.HorizontalInterval
+    mask: HorizontalMask
     expr: Expr
 
     @root_validator(skip_on_failure=True)
@@ -232,17 +231,13 @@ class HorizontalSpecialization(Expr):
         values["kind"] = values["expr"].kind
         return values
 
-    @property
-    def intervals(self) -> Tuple[common.HorizontalInterval, common.HorizontalInterval]:
-        return (self.i, self.j)
-
 
 def horizontal_specializations_are_disjoint(
     self: HorizontalSpecialization, other: HorizontalSpecialization
 ) -> bool:
     return any(
         horizontal_intervals_are_disjoint(interval1, interval2)
-        for interval1, interval2 in zip(self.intervals, other.intervals)
+        for interval1, interval2 in zip(self.mask.intervals, other.mask.intervals)
     )
 
 

@@ -27,6 +27,7 @@ from .oir_utils import (
     FieldAccessFactory,
     FieldDeclFactory,
     HorizontalExecutionFactory,
+    HorizontalMaskFactory,
     HorizontalSpecializationFactory,
     HorizontalSwitchFactory,
     MaskStmtFactory,
@@ -316,7 +317,9 @@ def corner_specializations():
         )
         specializations.append(
             HorizontalSpecializationFactory(
-                i=i_interval, j=j_interval, expr__name="field", expr__offset__i=1
+                mask=HorizontalMaskFactory(i=i_interval, j=j_interval),
+                expr__name="field",
+                expr__offset__i=1,
             )
         )
     return specializations

@@ -22,7 +22,7 @@ from gtc import common, oir
 
 from .common_utils import (
     CartesianOffsetFactory,
-    HorizontalIntervalFactory,
+    HorizontalMaskFactory,
     identifier,
     undefined_symbol_list,
 )
@@ -115,8 +115,7 @@ class HorizontalSpecializationFactory(factory.Factory):
     class Meta:
         model = oir.HorizontalSpecialization
 
-    i = factory.SubFactory(HorizontalIntervalFactory)
-    j = factory.SubFactory(HorizontalIntervalFactory)
+    mask = factory.SubFactory(HorizontalMaskFactory)
     expr = factory.SubFactory(FieldAccessFactory)
 
 
