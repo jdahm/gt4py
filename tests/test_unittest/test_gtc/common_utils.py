@@ -70,3 +70,11 @@ class HorizontalIntervalFactory(factory.Factory):
 
     start = common.AxisBound.start()
     end = common.AxisBound.end()
+
+
+class HorizontalMaskFactory(factory.Factory):
+    class Meta:
+        model = common.HorizontalMask
+
+    i = factory.SubFactory(HorizontalIntervalFactory)
+    j = factory.SubFactory(HorizontalIntervalFactory)

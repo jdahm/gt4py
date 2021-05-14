@@ -184,12 +184,13 @@ class DefIRToGTIR(IRNodeVisitor):
         return [self.visit(s, **kwargs) for s in node.stmts]
 
     def visit_HorizontalIf(self, node: HorizontalIf) -> gtir.HorizontalRegion:
+        LARGE_NUM = 10000
         axes = {}
         for axis in Domain.LatLonGrid().parallel_axes:
             interval = node.intervals[axis.name]
 
             bound = interval.start
-            if bound.offset < -1000:
+            if bound.offset < -LARGE_NUM:
                 start_bound = common.AxisEndpoint.START
             else:
                 start_bound = common.AxisBound(
@@ -198,7 +199,7 @@ class DefIRToGTIR(IRNodeVisitor):
                 )
 
             bound = interval.end
-            if bound.offset > 1000:
+            if bound.offset > LARGE_NUM:
                 end_bound = common.AxisEndpoint.END
             else:
                 end_bound = common.AxisBound(
@@ -208,11 +209,11 @@ class DefIRToGTIR(IRNodeVisitor):
 
             axes[axis.name.lower()] = common.HorizontalInterval(start=start_bound, end=end_bound)
 
-        serial_assignment = common.horizontal_interval_is_serial(**axes)
-        body = gtir.BlockStmt(
-            body=[self.visit(stmt, serial_assignment=serial_assignment) for stmt in node.body.stmts]
+        mask = gtir.HorizontalMask(**axes)
+        return gtir.HorizontalRegion(
+            mask=mask,
+            block=gtir.BlockStmt(body=self.visit(node.body, serial_assignment=mask.single_index)),
         )
-        return gtir.HorizontalRegion(**axes, body=body)
 
     def visit_Assign(
         self, node: Assign, **kwargs: Any

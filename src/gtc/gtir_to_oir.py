@@ -15,11 +15,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any, List, Union
 
 from eve import NodeTranslator
 from gtc import gtir, oir
-from gtc.common import BlockStmt, CartesianOffset, DataType, LogicalOperator, UnaryOperator
+from gtc.common import CartesianOffset, DataType, LogicalOperator, UnaryOperator
 
 
 def _create_mask(ctx: "GTIRToOIR.Context", name: str, cond: oir.Expr) -> oir.Temporary:
@@ -67,8 +67,11 @@ class GTIRToOIR(NodeTranslator):
             self.horizontal_executions.append(horizontal_execution)
             return self
 
-    def visit_ParAssignStmt(
-        self, node: gtir.ParAssignStmt, *, mask: oir.Expr = None, ctx: Context, **kwargs: Any
+    def _add_assign_stmt(
+        self,
+        node: Union[gtir.ParAssignStmt, gtir.SerialAssignStmt],
+        ctx: Context,
+        mask: oir.Expr = None,
     ) -> None:
         body = [oir.AssignStmt(left=self.visit(node.left), right=self.visit(node.right))]
         if mask is not None:
@@ -79,6 +82,16 @@ class GTIRToOIR(NodeTranslator):
                 declarations=[],
             ),
         )
+
+    def visit_ParAssignStmt(
+        self, node: gtir.ParAssignStmt, *, mask: oir.Expr = None, ctx: Context, **kwargs: Any
+    ) -> None:
+        self._add_assign_stmt(node, ctx, mask)
+
+    def visit_SerialAssignStmt(
+        self, node: gtir.SerialAssignStmt, *, mask: oir.Expr = None, ctx: Context, **kwargs: Any
+    ) -> None:
+        self._add_assign_stmt(node, ctx, mask)
 
     def visit_FieldAccess(self, node: gtir.FieldAccess, **kwargs: Any) -> oir.FieldAccess:
         return oir.FieldAccess(
@@ -162,6 +175,20 @@ class GTIRToOIR(NodeTranslator):
                 mask=combined_mask,
                 ctx=ctx,
             )
+
+    def visit_HorizontalMask(self, node: gtir.HorizontalMask) -> oir.HorizontalMask:
+        return oir.HorizontalMask(i=node.i, j=node.j)
+
+    def visit_HorizontalRegion(
+        self, node: gtir.HorizontalRegion, *, mask: oir.Expr = None, ctx: Context, **kwargs: Any
+    ) -> None:
+        current_mask = self.visit(node.mask)
+        combined_mask = (
+            oir.BinaryOf(op=LogicalOperator.AND, left=mask, right=current_mask)
+            if mask
+            else current_mask
+        )
+        self.visit(node.block.body, mask=combined_mask, ctx=ctx)
 
     def visit_Interval(self, node: gtir.Interval, **kwargs: Any) -> oir.Interval:
         return oir.Interval(

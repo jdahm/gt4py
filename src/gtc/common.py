@@ -784,10 +784,11 @@ def horizontal_interval_is_serial(i: HorizontalInterval, j: HorizontalInterval):
     return i.end.offset == i.start.offset + 1 and j.end.offset == j.start.offset + 1
 
 
-class HorizontalRegion(GenericNode, Generic[StmtT]):
+class HorizontalMask(GenericNode, Generic[ExprT]):
     i: HorizontalInterval
     j: HorizontalInterval
-    body: StmtT
+    kind = ExprKind.FIELD
+    dtype = DataType.BOOL
 
     @property
     def single_index(self) -> bool:

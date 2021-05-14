@@ -21,7 +21,7 @@ OIR represents a computation at the level of GridTools stages and multistages,
 e.g. stage merging, staged computations to compute-on-the-fly, cache annotations, etc.
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from pydantic import root_validator, validator
 
@@ -32,8 +32,6 @@ from gtc.common import AxisBound, LocNode
 
 
 class Expr(common.Expr):
-    dtype: Optional[common.DataType]
-
     # TODO Eve could provide support for making a node abstract
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         if type(self) is Expr:
@@ -213,6 +211,10 @@ def horizontal_intervals_are_disjoint(
         o_end = -OFFSET_SIZE
 
     return not (s_start <= o_start < s_end) and not (o_start <= s_start < o_end)
+
+
+class HorizontalMask(common.HorizontalMask[Expr], Expr):
+    pass
 
 
 class HorizontalSpecialization(Expr):
