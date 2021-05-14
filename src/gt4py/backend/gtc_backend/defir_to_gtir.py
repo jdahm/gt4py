@@ -50,6 +50,24 @@ from gtc import common, gtir
 from gtc.common import ExprKind
 
 
+class CheckHorizontalRegionAccesses(IRNodeVisitor):
+    """Ensure that FieldAccess nodes in HorizontalRegions reference only API parameters.
+
+    TODO(johannd): Move this to a frontend check if still needed later.
+    """
+
+    def visit_Stencil(self, node: gtir.Stencil) -> None:
+        self.param_names = [decl.name for decl in node.params]
+        self.visit(node.vertical_loops)
+
+    def visit_HorizontalRegion(self, node: gtir.HorizontalRegion) -> None:
+        fields_accessed = (
+            node.block.iter_tree().if_isinstance(gtir.FieldAccess).getattr("name").to_set()
+        )
+        if any(name not in self.param_names for name in fields_accessed):
+            raise ValueError("Cannot reference non-API field in HorizontalRegion")
+
+
 def transform_offset(offset: Dict[str, int]) -> gtir.CartesianOffset:
     i = offset["I"] if "I" in offset else 0
     j = offset["J"] if "J" in offset else 0
@@ -123,7 +141,9 @@ class DefIRToGTIR(IRNodeVisitor):
 
     @classmethod
     def apply(cls, root, **kwargs: Any):
-        return cls().visit(root)
+        stencil = cls().visit(root)
+        CheckHorizontalRegionAccesses().visit(stencil)
+        return stencil
 
     def __init__(self):
         self._scalar_params = None
