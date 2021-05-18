@@ -232,7 +232,9 @@ class DefIRToGTIR(IRNodeVisitor):
         mask = gtir.HorizontalMask(**axes)
         return gtir.HorizontalRegion(
             mask=mask,
-            block=gtir.BlockStmt(body=self.visit(node.body, serial_assignment=mask.single_index)),
+            block=gtir.BlockStmt(
+                body=self.visit(node.body, serial_assignment=mask.is_single_index)
+            ),
         )
 
     def visit_Assign(

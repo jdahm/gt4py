@@ -768,20 +768,15 @@ class HorizontalInterval(Node):
 
         return values
 
+    @property
+    def is_single_index(self) -> bool:
+        if not isinstance(self.start, AxisBound) or not isinstance(self.end, AxisBound):
+            return False
 
-def horizontal_interval_is_serial(i: HorizontalInterval, j: HorizontalInterval):
-    if not (
-        isinstance(i.start, AxisBound)
-        and isinstance(i.end, AxisBound)
-        and isinstance(j.start, AxisBound)
-        and isinstance(j.end, AxisBound)
-    ):
-        return False
+        if not self.start.level == self.end.level:
+            return False
 
-    if i.start.level != i.end.level or j.start.level != j.end.level:
-        return False
-
-    return i.end.offset == i.start.offset + 1 and j.end.offset == j.start.offset + 1
+        return abs(self.end.offset - self.start.offset) == 1
 
 
 class HorizontalMask(GenericNode, Generic[ExprT]):
@@ -791,8 +786,8 @@ class HorizontalMask(GenericNode, Generic[ExprT]):
     dtype = DataType.BOOL
 
     @property
-    def single_index(self) -> bool:
-        return horizontal_interval_is_serial(self.i, self.j)
+    def is_single_index(self) -> bool:
+        return self.i.is_single_index and self.j.is_single_index
 
     @property
     def intervals(self) -> Tuple[HorizontalInterval, HorizontalInterval]:
