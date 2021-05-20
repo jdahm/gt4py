@@ -179,22 +179,6 @@ class GTFunctor(LocNode, SymbolTableTrait):
     param_list: GTParamList
 
 
-class Param(LocNode):
-    name: SymbolName
-
-    class Config(eve.concepts.FrozenModel.Config):
-        pass
-
-    # TODO see https://github.com/eth-cscs/eve_toolchain/issues/40
-    def __hash__(self) -> int:
-        return hash(self.name)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Param):
-            return NotImplemented
-        return self.name == other.name
-
-
 class Arg(LocNode):
     name: SymbolRef
 
