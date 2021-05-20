@@ -16,7 +16,7 @@
 
 
 import enum
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Tuple, Union
 
 from pydantic.class_validators import validator
 
@@ -28,8 +28,6 @@ from gtc.common import LocNode
 
 
 class Expr(common.Expr):
-    dtype: Optional[common.DataType]
-
     # TODO Eve could provide support for making a node abstract
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         if type(self) is Expr:
@@ -98,10 +96,6 @@ class NativeFuncCall(common.NativeFuncCall[Expr], Expr):
 
 
 class Cast(common.Cast[Expr], Expr):  # type: ignore
-    pass
-
-
-class VerticalDimension(LocNode):
     pass
 
 
