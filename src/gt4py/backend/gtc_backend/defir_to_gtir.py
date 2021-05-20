@@ -16,6 +16,7 @@
 
 from typing import Any, Dict, List, Union, cast
 
+import eve
 from gt4py.ir import IRNodeVisitor
 from gt4py.ir.nodes import (
     ArgumentInfo,
@@ -50,7 +51,7 @@ from gtc import common, gtir
 from gtc.common import ExprKind
 
 
-class CheckHorizontalRegionAccesses(IRNodeVisitor):
+class CheckHorizontalRegionAccesses(eve.NodeVisitor):
     """Ensure that FieldAccess nodes in HorizontalRegions reference only API parameters.
 
     TODO(johannd): Move this to a frontend check if still needed later.
@@ -211,7 +212,7 @@ class DefIRToGTIR(IRNodeVisitor):
 
             bound = interval.start
             if bound.offset < -LARGE_NUM:
-                start_bound = common.AxisEndpoint.START
+                start_bound = common.LevelMarker.START
             else:
                 start_bound = common.AxisBound(
                     level=self.GT4PY_LEVELMARKER_TO_GTIR_LEVELMARKER[bound.level],
@@ -220,7 +221,7 @@ class DefIRToGTIR(IRNodeVisitor):
 
             bound = interval.end
             if bound.offset > LARGE_NUM:
-                end_bound = common.AxisEndpoint.END
+                end_bound = common.LevelMarker.END
             else:
                 end_bound = common.AxisBound(
                     level=self.GT4PY_LEVELMARKER_TO_GTIR_LEVELMARKER[bound.level],
