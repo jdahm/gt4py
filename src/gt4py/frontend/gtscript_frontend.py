@@ -242,7 +242,7 @@ class AxisIntervalParser(gt_meta.ASTPass):
 
     def _make_axis_bound(
         self,
-        value: Union[int, None, gtscript._AxisOffset, gt_ir.AxisBound, gt_ir.VarRef],
+        value: Union[int, None, gtscript.AxisIndex, gt_ir.AxisBound, gt_ir.VarRef],
         endpt: gt_ir.LevelMarker,
     ) -> gt_ir.AxisBound:
         if isinstance(value, gt_ir.AxisBound):
@@ -254,7 +254,7 @@ class AxisIntervalParser(gt_meta.ASTPass):
             elif isinstance(value, gt_ir.VarRef):
                 level = value
                 offset = 0
-            elif isinstance(value, gtscript._AxisOffset):
+            elif isinstance(value, gtscript.AxisIndex):
                 level = gt_ir.LevelMarker.START if value.index >= 0 else gt_ir.LevelMarker.END
                 offset = value.index + value.offset
             elif value is None:
@@ -273,8 +273,8 @@ class AxisIntervalParser(gt_meta.ASTPass):
     def visit_Name(self, node: ast.Name) -> gt_ir.VarRef:
         return gt_ir.VarRef(name=node.id)
 
-    def visit_Constant(self, node: ast.Constant) -> Union[int, gtscript._AxisOffset, None]:
-        if isinstance(node.value, gtscript._AxisOffset):
+    def visit_Constant(self, node: ast.Constant) -> Union[int, gtscript.AxisIndex, None]:
+        if isinstance(node.value, gtscript.AxisIndex):
             return node.value
         elif isinstance(node.value, numbers.Number):
             return int(node.value)
@@ -286,7 +286,7 @@ class AxisIntervalParser(gt_meta.ASTPass):
                 loc=self.loc,
             )
 
-    def visit_BinOp(self, node: ast.BinOp) -> Union[gtscript._AxisOffset, gt_ir.AxisBound, int]:
+    def visit_BinOp(self, node: ast.BinOp) -> Union[gtscript.AxisIndex, gt_ir.AxisBound, int]:
         left = self.visit(node.left)
         right = self.visit(node.right)
 
@@ -308,10 +308,10 @@ class AxisIntervalParser(gt_meta.ASTPass):
             "Incompatible types found in interval expression"
         )
 
-        if isinstance(left, gtscript._AxisOffset):
+        if isinstance(left, gtscript.AxisIndex):
             if not isinstance(right, numbers.Number):
                 raise incompatible_types_error
-            return gtscript._AxisOffset(
+            return gtscript.AxisIndex(
                 axis=left.axis, index=left.index, offset=bin_op(left.offset, right)
             )
         elif isinstance(left, gt_ir.VarRef):
@@ -346,9 +346,7 @@ class AxisIntervalParser(gt_meta.ASTPass):
         if not isinstance(node.slice, ast.Index):
             raise self.interval_error
 
-        return gtscript._AxisOffset(
-            axis=self.axis_name, index=self.visit(node.slice.value), offset=0
-        )
+        return gtscript.AxisIndex(axis=self.axis_name, index=self.visit(node.slice.value), offset=0)
 
 
 parse_interval_node = AxisIntervalParser.apply
@@ -372,7 +370,7 @@ class ValueInliner(ast.NodeTransformer):
         qualified_name = gt_meta.get_qualified_name_from_node(name_or_attr_node)
         if qualified_name in self.context:
             value = self.context[qualified_name]
-            if value is None or isinstance(value, (bool, numbers.Number, gtscript._AxisOffset)):
+            if value is None or isinstance(value, (bool, numbers.Number, gtscript.AxisIndex)):
                 new_node = ast.Constant(value=value)
             elif hasattr(value, "_gtscript_"):
                 pass
@@ -914,7 +912,7 @@ class IRMaker(ast.NodeVisitor):
         if len(args) == 2:
             if any(isinstance(arg, ast.Subscript) for arg in args):
                 raise GTScriptSyntaxError(
-                    "Two-argument syntax should not use AxisOffsets or AxisIntervals"
+                    "Two-argument syntax should not use AxisIndexs or AxisIntervals"
                 )
             interval_node = ast.Slice(lower=args[0], upper=args[1])
             ast.copy_location(interval_node, node)
@@ -1492,7 +1490,7 @@ class GTScriptParser(ast.NodeVisitor):
         *gtscript._VALID_DATA_TYPES,
         types.FunctionType,
         type(None),
-        gtscript._AxisOffset,
+        gtscript.AxisIndex,
     )
 
     def __init__(self, definition, *, options, externals=None):
