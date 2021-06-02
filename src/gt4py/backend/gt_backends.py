@@ -157,7 +157,7 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                 conditions.append(
                     gt_ir.BinOpExpr(
                         op=gt_ir.BinaryOperator.EQ,
-                        lhs=gt_ir.AxisIndex(axis=axis),
+                        lhs=gt_ir.IterationIndex(axis=axis),
                         rhs=gt_ir.AxisOffset(
                             axis=axis, endpt=interval.start.level, offset=interval.start.offset
                         ),
@@ -172,7 +172,7 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                     conditions.append(
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.GE,
-                            lhs=gt_ir.AxisIndex(axis=axis),
+                            lhs=gt_ir.IterationIndex(axis=axis),
                             rhs=gt_ir.AxisOffset(
                                 axis=axis, endpt=interval.start.level, offset=interval.start.offset
                             ),
@@ -184,7 +184,7 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                     conditions.append(
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.LT,
-                            lhs=gt_ir.AxisIndex(axis=axis),
+                            lhs=gt_ir.IterationIndex(axis=axis),
                             rhs=gt_ir.AxisOffset(
                                 axis=axis, endpt=interval.end.level, offset=interval.end.offset
                             ),
@@ -484,7 +484,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return (start_splitter, start_offset), (end_splitter, end_offset)
 
-    def visit_AxisIndex(self, node: gt_ir.AxisIndex) -> str:
+    def visit_IterationIndex(self, node: gt_ir.IterationIndex) -> str:
         return f"eval.{node.axis.lower()}()"
 
     def visit_AxisOffset(self, node: gt_ir.AxisOffset) -> str:
@@ -527,7 +527,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 arg["extent"] = gt_utils.flatten(accessor.extent)
             args.append(arg)
 
-        if len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex))) > 0:
+        if len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.IterationIndex))) > 0:
             args.extend(
                 [
                     {"name": f"domain_size_{name}", "access_type": "in", "extent": None}
@@ -599,7 +599,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             if name not in node.unreferenced
         ]
 
-        requires_positional = len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.AxisIndex))) > 0
+        requires_positional = len(tuple(gt_ir.filter_nodes_dfs(node, gt_ir.IterationIndex))) > 0
         stage_functors = {}
         for multi_stage in node.multi_stages:
             for group in multi_stage.groups:
