@@ -282,7 +282,7 @@ class AxisIntervalParser(gt_meta.ASTPass):
             return None
         else:
             raise GTScriptSyntaxError(
-                f"Unexpected type found {type(node.value)}. Expected one of: int, AxisOffset, string (var ref), or None.",
+                f"Unexpected type found {type(node.value)}. Expected one of: int, AxisIndex, string (var ref), or None.",
                 loc=self.loc,
             )
 

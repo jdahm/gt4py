@@ -158,7 +158,7 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                     gt_ir.BinOpExpr(
                         op=gt_ir.BinaryOperator.EQ,
                         lhs=gt_ir.IterationIndex(axis=axis),
-                        rhs=gt_ir.AxisOffset(
+                        rhs=gt_ir.AxisIndex(
                             axis=axis, endpt=interval.start.level, offset=interval.start.offset
                         ),
                     )
@@ -173,7 +173,7 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.GE,
                             lhs=gt_ir.IterationIndex(axis=axis),
-                            rhs=gt_ir.AxisOffset(
+                            rhs=gt_ir.AxisIndex(
                                 axis=axis, endpt=interval.start.level, offset=interval.start.offset
                             ),
                         )
@@ -185,7 +185,7 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.LT,
                             lhs=gt_ir.IterationIndex(axis=axis),
-                            rhs=gt_ir.AxisOffset(
+                            rhs=gt_ir.AxisIndex(
                                 axis=axis, endpt=interval.end.level, offset=interval.end.offset
                             ),
                         )
@@ -487,7 +487,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
     def visit_IterationIndex(self, node: gt_ir.IterationIndex) -> str:
         return f"eval.{node.axis.lower()}()"
 
-    def visitAxisIndex(self, node: gt_ir.AxisOffset) -> str:
+    def visitAxisIndex(self, node: gt_ir.AxisIndex) -> str:
         return "static_cast<gt::int_t>({endpt}{offset:+d})".format(
             endpt=f"eval(domain_size_{node.axis.upper()}())"
             if node.endpt == gt_ir.LevelMarker.END
