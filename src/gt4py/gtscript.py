@@ -356,7 +356,7 @@ def lazy_stencil(
 
 
 class AxisIndex:
-    def __init__(self, axis: str, index: int, offset: int):
+    def __init__(self, axis: str, index: int, offset: int = 0):
         self.axis = axis
         self.index = index
         self.offset = offset
