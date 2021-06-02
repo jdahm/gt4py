@@ -372,7 +372,7 @@ class ValueInliner(ast.NodeTransformer):
         qualified_name = gt_meta.get_qualified_name_from_node(name_or_attr_node)
         if qualified_name in self.context:
             value = self.context[qualified_name]
-            if value is None or isinstance(value, (bool, numbers.Number, gtscript._AxisOffset)):
+            if value is None or isinstance(value, (bool, numbers.Number, gtscript.AxisIndex)):
                 new_node = ast.Constant(value=value)
             elif hasattr(value, "_gtscript_"):
                 pass
@@ -914,7 +914,7 @@ class IRMaker(ast.NodeVisitor):
         if len(args) == 2:
             if any(isinstance(arg, ast.Subscript) for arg in args):
                 raise GTScriptSyntaxError(
-                    "Two-argument syntax should not use AxisOffsets or AxisIntervals"
+                    "Two-argument syntax should not use AxisIndexs or AxisIntervals"
                 )
             interval_node = ast.Slice(lower=args[0], upper=args[1])
             ast.copy_location(interval_node, node)
@@ -1492,7 +1492,7 @@ class GTScriptParser(ast.NodeVisitor):
         *gtscript._VALID_DATA_TYPES,
         types.FunctionType,
         type(None),
-        gtscript._AxisOffset,
+        gtscript.AxisIndex,
     )
 
     def __init__(self, definition, *, options, externals=None):
